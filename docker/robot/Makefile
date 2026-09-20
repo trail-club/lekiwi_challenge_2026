@@ -3,15 +3,17 @@
 # 使い方:
 #   make build       イメージをビルド
 #   make bootstrap   ★ 初回とパッケージ追加時。上流取得 + colcon build + 静的検査
-#   make install-udev BUS_MODE=shared|split  .env からホストudevルールを生成
-#   make up-split / make up-shared  コンテナだけ起動
+#   make install-udev BUS_MODE=shared|split|base  .env からホストudevルールを生成
+#   make up-split / make up-shared / make up-base  コンテナだけ起動
 #   make run-split SO101_ROBOT_ID=my_follower
 #   make run-shared LEKIWI_ROBOT_ID=my_lekiwi
-#   make mock-split / make mock-shared
+#   make run-base    ★ アームを取り外した機体 (ベース + LiDAR だけ)
+#   make mock-split / make mock-shared / make mock-base
 #   make shell       コンテナに入る
 #   make stow        reach.launch.py起動中にアームを低く畳む
 #   make save-map    現在の地図を保存
 #   make check       ROS グラフの不変条件を確認
+#   make check-base  同上。アームを取り外した機体むけ
 #   make release-check BUS_MODE=shared ★ 読むだけ
 #   make release BUS_MODE=shared       ★ 異常終了後に全解放
 #   make down        コンテナを停止・削除
@@ -20,8 +22,13 @@
 #   通常  : アームを安全な低い姿勢にしてからrun端末でCtrl+C
 #   非常時: **物理スイッチを切る。** docker kill は使わない
 #           (SIGKILL では停止処理が走らず、ホイールは最後の指令速度で回り続ける)
-#   異常終了からの復帰: launchを止めて make release BUS_MODE=split|shared
+#   異常終了からの復帰: launchを止めて make release BUS_MODE=split|shared|base
 #                         (コンテナは停止しなくてよい)
+#
+# ■ BUS_MODE の 3 値
+#   split : アーム 7.4V を /dev/so101_follower、ホイール 12V を /dev/lekiwi
+#   shared: 全モータ 12V、canonical ID 1〜9 を /dev/lekiwi 1 本で持つ
+#   base  : ★ アームを取り外した機体。ホイール (と LiDAR) しか無い
 
 -include .env
 
@@ -65,10 +72,11 @@ LEGACY += lekiwi-nav lekiwi-nav-mock lekiwi-so101-arm lekiwi-so101-arm-mock \
 CONFLICTS_FOR_REAL := $(LEGACY) $(SVC_MOCK)
 CONFLICTS_FOR_MOCK := $(LEGACY) $(SVC)
 
-.PHONY: build bootstrap install-udev udev-dry-run up-split up-shared run-split run-shared \
-        mock-split mock-shared shell stow save-map check release \
+.PHONY: build bootstrap install-udev udev-dry-run up-split up-shared up-base \
+        run-split run-shared run-base \
+        mock-split mock-shared mock-base shell stow save-map check check-base release \
         release-wheels release-check down logs guard guard-mock require-bus-mode \
-        preflight-shared-devices preflight-split-devices
+        preflight-shared-devices preflight-split-devices preflight-base-devices
 
 build:
 	docker compose -f compose.yaml build
@@ -123,6 +131,9 @@ preflight-split-devices: preflight-shared-devices
 	@test -c "$(SO101_DEVICE)" || { \
 	  echo "ERROR: $(SO101_DEVICE) が文字デバイスではない。make install-udev BUS_MODE=split とUSB接続を確認すること" >&2; exit 1; }
 
+# アームを取り外した機体が要るのはベースとLiDARの2つだけ。shared機と同じ。
+preflight-base-devices: preflight-shared-devices
+
 up-split: guard preflight-split-devices
 	@test -f .env || { echo "ERROR: .env が無い。cp .env.example .env して編集すること" >&2; exit 1; }
 	mkdir -p $(MAP_DIR)
@@ -132,6 +143,13 @@ up-shared: guard preflight-shared-devices
 	@test -f .env || { echo "ERROR: .env が無い。cp .env.example .env して編集すること" >&2; exit 1; }
 	mkdir -p $(MAP_DIR)
 	docker compose -f compose.yaml -f compose.shared.yaml up -d
+
+# ★ アームを取り外した機体。compose.base.yaml は /dev/so101_follower を
+#   mount しない (存在しないので mount するとコンテナが上がらない)。
+up-base: guard preflight-base-devices
+	@test -f .env || { echo "ERROR: .env が無い。cp .env.example .env して編集すること" >&2; exit 1; }
+	mkdir -p $(MAP_DIR)
+	docker compose -f compose.yaml -f compose.base.yaml up -d
 
 # ★ 前面で走らせること。Ctrl+C が launch に届いてはじめて停止処理
 #   (アームのトルク OFF + ホイールの速度ゼロ) が走る。
@@ -152,6 +170,16 @@ run-shared: up-shared
 		robot_id:=$(LEKIWI_ROBOT_ID) start_rviz:=$(START_RVIZ) \
 		lekiwi_port:=$(LEKIWI_DEVICE) lidar_port:=$(RPLIDAR_DEVICE)
 
+# ★ アームを取り外した機体。motor_bus_mode は渡さない (アームが無ければ
+#   バスの分け方は関係なく、ベースが自分で /dev/lekiwi の ID 7/8/9 を開く)。
+#   robot_state_publisher と RViz はベース側が持つ。
+run-base: up-base
+	docker compose -f compose.yaml exec -it $(SVC) $(E) \
+		ros2 launch lekiwi_so101_bringup robot.launch.py \
+		start_arm:=false start_rviz:=$(START_RVIZ) \
+		lekiwi_port:=$(LEKIWI_DEVICE) \
+		lidar_port:=$(RPLIDAR_DEVICE)
+
 mock-split: guard-mock
 	docker compose -f compose.mock.yaml up -d
 	docker compose -f compose.mock.yaml exec -it $(SVC_MOCK) $(E) \
@@ -166,6 +194,12 @@ mock-shared: guard-mock
 		motor_bus_mode:=shared sim:=true backend:=mock \
 		start_rviz:=$(MOCK_START_RVIZ) \
 		mock_wrist_camera_optical:=true
+
+mock-base: guard-mock
+	docker compose -f compose.mock.yaml up -d
+	docker compose -f compose.mock.yaml exec -it $(SVC_MOCK) $(E) \
+		ros2 launch lekiwi_so101_bringup robot.launch.py \
+		start_arm:=false sim:=true start_rviz:=$(MOCK_START_RVIZ)
 
 shell:
 	docker compose -f compose.yaml exec -it $(SVC) bash
@@ -225,6 +259,34 @@ check:
 	echo "--- map -> arm_gripper_frame_link ---"; \
 	$(call echo_tf,$$C,map,arm_gripper_frame_link,RSP かコントローラが未起動)
 
+# ★ アームを取り外した機体むけ。check との違いは期待値だけ。
+#   /joint_states の publisher は 1 (車輪 3 関節のみ)。ros2_control は起動しない
+#   ので controllers も follow_joint_trajectory も無いのが正しい。
+check-base:
+	@C=$$(docker ps -q -f name=^$(SVC)$$ -f name=^$(SVC_MOCK)$$ | head -1); \
+	test -n "$$C" || { echo "コンテナが動いていない" >&2; exit 1; }; \
+	echo "discovery を待っています..."; \
+	for i in $$(seq 1 30); do \
+	  n=$$(docker exec $$C $(E) ros2 topic info /joint_states 2>/dev/null \
+	       | sed -n 's/.*Publisher count: //p'); \
+	  [ "$$n" = "1" ] && break; sleep 2; \
+	done; \
+	echo "--- /robot_description (期待: 1) ---"; \
+	docker exec $$C $(E) ros2 topic info /robot_description | grep 'Publisher count'; \
+	echo "--- /joint_states (期待: 1 = 車輪のみ) ---"; \
+	docker exec $$C $(E) ros2 topic info /joint_states | grep 'Publisher count'; \
+	echo "--- ★ アームのノードが居ないこと (期待: 何も出ない) ---"; \
+	docker exec $$C $(E) ros2 node list | grep -E 'so101|controller_manager' && \
+	  echo "  ★ アームのノードが残っている。start_arm:=false で起動していない" || \
+	  echo "  OK"; \
+	echo "--- ★ nav2 の action が見えること ---"; \
+	docker exec $$C $(E) ros2 action list | grep -E 'navigate_to_pose' || \
+	  echo "  ★ Nav2 が上がっていない"; \
+	echo "--- map -> base_footprint ---"; \
+	$(call echo_tf,$$C,map,base_footprint,slam_toolbox か base_driver が未起動); \
+	echo "--- base_link -> laser_link ---"; \
+	$(call echo_tf,$$C,base_link,laser_link,RSP が未起動)
+
 # ★★ 復帰系は「コンテナが生きていてもいなくても、同じ 1 コマンドで通る」ようにする。
 #
 #   いちばん多い故障は「**launch だけが落ちて、コンテナは生きている**」。
@@ -236,32 +298,51 @@ check:
 #     確認し、居ればそのプロセス名を出して中止する。
 #     以前ここに「コンテナが動いていたら中止」という guard を置いていたが、
 #     **launch が落ちてコンテナだけ生きている場合を弾いてしまう**ので廃止した。
+
+# ★ BUS_MODE=base (アームを取り外した機体) の翻訳。
+#   release_all 自身には base を増やさない。あれは**バスの分け方**の引数で、
+#   アームの有無とは別の軸だから。ここで「split のホイールだけ」へ直す。
+#   使い捨てコンテナ側も compose.base.yaml にしないと、存在しない
+#   /dev/so101_follower を mount しようとして起動に失敗する。
+RELEASE_COMPOSE  = compose.split.yaml
+RELEASE_BUS_MODE = $(BUS_MODE)
+RELEASE_ONLY     =
+ifeq ($(BUS_MODE),shared)
+  RELEASE_COMPOSE  = compose.shared.yaml
+endif
+ifeq ($(BUS_MODE),base)
+  RELEASE_COMPOSE  = compose.base.yaml
+  RELEASE_BUS_MODE = split
+  RELEASE_ONLY     = --only wheels
+endif
+
 define release_all_cmd
-	$(if $(filter shared,$(BUS_MODE)),$(eval RELEASE_COMPOSE=compose.shared.yaml),$(eval RELEASE_COMPOSE=compose.split.yaml))
 	@if [ -n "$$(docker ps -q -f name=^$(SVC)$$)" ]; then \
 	  echo "コンテナ $(SVC) は動いています。その中で実行します。"; \
 	  docker compose -f compose.yaml exec $(1) $(SVC) $(E) \
-	    ros2 run lekiwi_so101_bringup release_all --bus-mode $(BUS_MODE) \
+	    ros2 run lekiwi_so101_bringup release_all --bus-mode $(RELEASE_BUS_MODE) \
 	      --shared-port $(LEKIWI_DEVICE) --wheel-port $(LEKIWI_DEVICE) \
-	      --arm-port $(SO101_DEVICE) $(2); \
+	      --arm-port $(SO101_DEVICE) $(RELEASE_ONLY) $(2); \
 	else \
 	  echo "コンテナ $(SVC) は動いていません。使い捨てコンテナで実行します。"; \
 	  docker compose -f compose.yaml -f $(RELEASE_COMPOSE) run --rm $(1) $(SVC) $(E) \
-	    ros2 run lekiwi_so101_bringup release_all --bus-mode $(BUS_MODE) \
+	    ros2 run lekiwi_so101_bringup release_all --bus-mode $(RELEASE_BUS_MODE) \
 	      --shared-port $(LEKIWI_DEVICE) --wheel-port $(LEKIWI_DEVICE) \
-	      --arm-port $(SO101_DEVICE) $(2); \
+	      --arm-port $(SO101_DEVICE) $(RELEASE_ONLY) $(2); \
 	fi
 endef
 
 require-bus-mode:
-	@test "$(BUS_MODE)" = split -o "$(BUS_MODE)" = shared || { \
-	  echo "ERROR: BUS_MODE=split または BUS_MODE=shared を必ず指定すること" >&2; \
+	@test "$(BUS_MODE)" = split -o "$(BUS_MODE)" = shared -o "$(BUS_MODE)" = base || { \
+	  echo "ERROR: BUS_MODE=split / shared / base のいずれかを必ず指定すること" >&2; \
+	  echo "       base はアームを取り外した機体 (ホイールとLiDARだけ)" >&2; \
 	  exit 2; \
 	}
 
 # ★ 異常終了からの復帰。**アームもホイールもこれ 1 つ**で解放する。
 #   ROS は使わずシリアルポートを直接開く。
 #   ★ アームは支えが無ければ落ちる。人が支えてから実行すること。
+#     (BUS_MODE=base はホイールしか触らないので、支える必要は無い)
 #   ★ コンテナは落とさなくてよい。launch さえ止まっていれば通る。
 release: require-bus-mode
 	$(call release_all_cmd,-it,)

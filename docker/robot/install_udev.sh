@@ -3,8 +3,15 @@
 # 追跡対象のテンプレート自体は書き換えない。
 set -euo pipefail
 
+# モード: 生成するルールの組を決める。
+#   split : lekiwi + rplidar + so101
+#   shared: lekiwi + rplidar        (全モータが1本のバスに居る機体)
+#   base  : lekiwi + rplidar        (★ アームを取り外した機体)
+# shared と base でルールは同じだが、呼ぶ側の BUS_MODE を揃えておく。
+# アームの無い機体に shared を指定させると、そのまま
+# `make release BUS_MODE=shared` へ流れてアームの ID 1〜6 を探して失敗する。
 usage() {
-  echo "usage: $0 [--dry-run] split|shared" >&2
+  echo "usage: $0 [--dry-run] split|shared|base" >&2
   exit 2
 }
 
@@ -14,7 +21,7 @@ if [[ "${1:-}" == "--dry-run" ]]; then
   shift
 fi
 mode="${1:-}"
-[[ "$mode" == "split" || "$mode" == "shared" ]] || usage
+[[ "$mode" == "split" || "$mode" == "shared" || "$mode" == "base" ]] || usage
 [[ $# -eq 1 ]] || usage
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -76,7 +83,8 @@ sudo install -m 0644 "$tmp_dir/99-rplidar.rules" /etc/udev/rules.d/99-rplidar.ru
 if [[ "$mode" == "split" ]]; then
   sudo install -m 0644 "$tmp_dir/99-so101.rules" /etc/udev/rules.d/99-so101.rules
 else
-  # shared機で過去のsplit用ルールを勝手に消さない。別機体との併用を壊さないため。
+  # shared機・アーム無し機で過去のsplit用ルールを勝手に消さない。
+  # 別機体との併用を壊さないため。
   true
 fi
 

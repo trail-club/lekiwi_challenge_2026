@@ -37,7 +37,7 @@ LiDAR / SLAM / Nav2 / SO-101 アーム / 手首カメラ（RealSense）を **1 �
          └ odom (base_driver のオドメトリ積分)
             └ base_footprint → base_link
                                ├ laser_link      ← RPLIDAR
-                               └ arm_mount_link
+                               └ arm_mount_link  ← start_arm:=false ではここまで
                                   └ arm_base_link … arm_gripper_link
                                        ├ arm_gripper_frame_link  ← リーチの手先
                                        └ wrist_camera_mount_link
@@ -63,6 +63,15 @@ split機では `.env` の `LEKIWI_SERIAL` と `SO101_SERIAL` を設定し、
 `make install-udev BUS_MODE=split` を使います。機体固有のシリアルを追跡対象の
 `.rules` へ直接書かないでください。
 
+アームを取り外した機体は `BUS_MODE=base` です。`LEKIWI_SERIAL` だけ設定します
+（生成されるルールは lekiwi と rplidar の 2 つ）。
+
+| `BUS_MODE` | 機体 | udev で作るルール |
+| --- | --- | --- |
+| `split` | アーム 7.4V + ホイール 12V。ポート 2 本 | lekiwi / rplidar / so101 |
+| `shared` | 全モータ 12V、canonical ID 1〜9 を 1 本で | lekiwi / rplidar |
+| `base` | **アームを取り外した機体** | lekiwi / rplidar |
+
 `make bootstrap` は `ros2_ws` をホストからマウントしたまま `colcon build
 --symlink-install` する。成果物はホスト側の `ros2_ws/build`・`install` に残るので、
 イメージを作り直しても消えない。
@@ -72,8 +81,10 @@ split機では `.env` の `LEKIWI_SERIAL` と `SO101_SERIAL` を設定し、
 ```bash
 make run-split SO101_ROBOT_ID=my_follower
 make run-shared LEKIWI_ROBOT_ID=my_lekiwi
+make run-base                  # ★ アームを取り外した機体
 make mock-split
 make mock-shared
+make mock-base
 ```
 
 splitは `robots/so_follower/<SO101_ROBOT_ID>.json`、sharedは
@@ -118,16 +129,55 @@ ros2 コマンドを使うときは別端末で:
 make shell        # docker compose exec -it robot bash
 ```
 
+### ★ アームを取り外した機体
+
+```bash
+make run-base            # 実機（ベース + LiDAR + SLAM + Nav2）
+make mock-base           # 実機なし
+make check-base          # 健全性チェック（期待値が make check と違う）
+```
+
+実体は `robot.launch.py start_arm:=false` です。
+
+```bash
+docker compose -f compose.yaml -f compose.base.yaml up -d
+docker compose exec -it robot /entrypoint.sh \
+  ros2 launch lekiwi_so101_bringup robot.launch.py start_arm:=false
+```
+
+| 項目 | アーム有り | `start_arm:=false` |
+| --- | --- | --- |
+| URDF | 結合 URDF（`lekiwi_so101_bringup`） | **ベース単体 URDF**（`lekiwi_description`） |
+| `robot_state_publisher` / RViz | `arm.launch.py` が持つ | **ベース側の include が持つ** |
+| `motor_bus_mode` | **必須** | **不要**（渡しても使われない） |
+| `hardware_backend` | shared なら `bridge` | 常に `serial`（/dev/lekiwi の ID 7/8/9） |
+| 手首カメラ | 起動する | **起動しない**（親の `arm_gripper_link` が無い） |
+| `/joint_states` の publisher | 2 | **1**（車輪 3 関節のみ） |
+| ros2_control | 3 コントローラが active | **起動しない** |
+| compose | `compose.split.yaml` / `compose.shared.yaml` | **`compose.base.yaml`**（`/dev/so101_follower` を mount しない） |
+| 停止 | アームを低くしてから `Ctrl+C` | `Ctrl+C` だけでよい |
+| 異常終了からの復帰 | `make release BUS_MODE=split\|shared` | **`make release BUS_MODE=base`** |
+
+> ★ `compose.base.yaml` が要るのは、アームを外した機体に
+> `/dev/so101_follower` が無いからです。`compose.split.yaml` のまま起動すると
+> `bind source path does not exist` でコンテナが上がりません。
+>
+> ★ `BUS_MODE=base` に `compose.shared.yaml` を流用しないこと。
+> `make release BUS_MODE=shared` はアームの ID 1〜6 も探しに行き、
+> 居ないので失敗します。`BUS_MODE=base` は `release_all` へ
+> `--bus-mode split --only wheels` として渡ります。
+
 ### `robot.launch.py` の主な引数
 
 | 引数 | 既定 | 意味 |
 | --- | --- | --- |
-| `motor_bus_mode` | **既定なし・必須** | `split`（2ポート）/ `shared`（1ポート、全12V、ID 1〜9） |
+| `motor_bus_mode` | （空）**`start_arm:=true` では必須** | `split`（2ポート）/ `shared`（1ポート、全12V、ID 1〜9）。`start_arm:=false` では使われない |
+| `start_arm` | `true` | `false` で**アームを取り外した機体**（下記） |
 | `sim` | `false` | `true` でシリアルも LiDAR も開かない（`base_driver` は dry_run、スキャンは `fake_scan`） |
 | `backend` | `mock` | `lerobot` で実機のアーム。`sim` とは独立 |
 | `robot_id` | （空） | `backend:=lerobot` では必須の LeRobot 較正 ID |
 | `use_saved_map` + `map_file` | `false` | `true` で slam_toolbox の代わりに map_server + AMCL |
-| `start_base` / `start_camera` / `start_lidar` / `start_rviz` | `true` | 部分起動 |
+| `start_base` / `start_camera` / `start_lidar` / `start_rviz` | `true` | 部分起動。★ `start_arm` と `start_base` を両方 `false` にはできない |
 | `mock_wrist_camera_optical` | `false` | カメラ実機なしで光学フレームだけ出す（`sim` 用） |
 
 ## 停止手順
@@ -157,7 +207,7 @@ ros2_controlでアームを安全な低い姿勢へ移してから停止して�
 | --- | --- |
 | いますぐ全部止めたい | **物理スイッチ（電源）を切る** |
 | ソフト的に安全に止めたい | アームを低くする（reach起動中なら `make stow`）→ launchを `Ctrl+C` |
-| 走り出したホイールだけ止めたい | **`make release-wheels BUS_MODE=split|shared`** |
+| 走り出したホイールだけ止めたい | **`make release-wheels BUS_MODE=split\|shared\|base`** |
 
 ## ★ 異常終了したとき何が起きるか
 
@@ -186,6 +236,7 @@ ros2_controlでアームを安全な低い姿勢へ移してから停止して�
 make release-check BUS_MODE=shared
 make release BUS_MODE=shared
 make release-wheels BUS_MODE=shared
+make release BUS_MODE=base      # ★ アームを取り外した機体（ホイールだけ）
 ```
 
 いちばん多い故障は「**launch だけが落ちて、コンテナは生きている**」で、
@@ -261,7 +312,8 @@ launch 全体が落ちた場合（SIGKILL）は前節を参照。
 ## 健全性チェック
 
 ```bash
-make check
+make check         # アーム有り
+make check-base    # ★ アームを取り外した機体
 ```
 
 - `/robot_description` の publisher = **1**（2 だと RViz に別のロボットが出る）
@@ -270,6 +322,14 @@ make check
 - **`ros2 action list` に `navigate_to_pose` と `follow_joint_trajectory` が同時に見える**
   ← 分割時は別コンテナだったのでこれができなかった
 - `map → arm_gripper_frame_link` と `map → wrist_camera_depth_optical_frame` の TF
+
+`make check-base` は期待値が違います。
+
+- `/robot_description` の publisher = **1**（ベース側の RSP が唯一の持ち主）
+- `/joint_states` の publisher = **1**（車輪 3 関節のみ）
+- **アームのノード（`so101*` / `controller_manager`）が 1 つも居ない**
+- `ros2 action list` に `navigate_to_pose` が見える
+- `map → base_footprint` と `base_link → laser_link` の TF
 
 ## インターフェース・CLI テストコマンド
 

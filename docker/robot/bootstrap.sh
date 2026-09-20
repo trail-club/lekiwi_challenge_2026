@@ -265,6 +265,7 @@ echo "== 完了 =="
 echo "以降は次で起動できます:"
 echo "  make run-split SO101_ROBOT_ID=my_follower"
 echo "  make run-shared LEKIWI_ROBOT_ID=my_lekiwi"
+echo "  make run-base                 # アームを取り外した機体"
 echo
 echo "設定や Python コードを編集したら launch を上げ直すだけで反映されます"
 echo "(--symlink-install なので colcon build も要りません)。"

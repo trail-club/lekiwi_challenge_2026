@@ -1,0 +1,22 @@
+# アームを取り外した機体: ホイール (と LiDAR) しか無い。
+#
+#   make run-base      実機
+#   make mock-base     実機なし (compose.mock.yaml を使う)
+#
+# ★ SO101_DEVICE を bind mount しない。これが compose.split.yaml との唯一の差で、
+#   アームを外した機体では /dev/so101_follower が存在せず、mount しようとすると
+#   "bind source path does not exist" でコンテナが上がらない。
+#
+# ★ compose.shared.yaml と中身は同じだが別ファイルにしてある。
+#   shared は「全モータ 12V・ID 1〜9 を 1 本のバスで持つ機体」という
+#   ハードウェアの主張で、アームの有無とは別の話。アームを外した split 機に
+#   shared を指定させると、`make release BUS_MODE=shared` がアームの ID 1〜6 を
+#   探して失敗する。BUS_MODE=base はそこまで含めて別物として扱う。
+services:
+  robot:
+    volumes:
+      - type: bind
+        source: ${LEKIWI_DEVICE:-/dev/lekiwi}
+        target: ${LEKIWI_DEVICE:-/dev/lekiwi}
+        bind:
+          create_host_path: false

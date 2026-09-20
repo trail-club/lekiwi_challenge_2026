@@ -210,6 +210,27 @@ make run-shared LEKIWI_ROBOT_ID=my_lekiwi
 `robot.launch.py` を前面実行します。コンテナだけ起動する場合は
 `make up-split` / `make up-shared`、シェルへ入る場合は `make shell` です。
 
+### アームを取り外した機体
+
+```bash
+make run-base
+```
+
+ベース・LiDAR・SLAM・Nav2 だけを起動します（`robot.launch.py start_arm:=false`）。
+`motor_bus_mode` も較正 ID も要りません。トルクの入るサーボが車輪だけなので、
+**停止は `Ctrl+C` だけ**でよく、アームを低くする手順は不要です。
+
+- URDF はベース単体のものになり、アームのリンクは最初から存在しません
+- 手首カメラ（RealSense）は `arm_gripper_link` に付くので起動しません
+- 健全性チェックは `make check-base`（`make check` とは期待値が違います）
+- 異常終了からの復帰は `make release BUS_MODE=base`
+
+> ★ udev ルールも `make install-udev BUS_MODE=base` です
+> （`LEKIWI_SERIAL` だけ設定すれば足ります）。
+>
+> 詳細は [`docker/robot/README.md`](docker/robot/README.md) の
+> 「★ アームを取り外した機体」。
+
 ### 手でアームを動かして角度を読む
 
 `arm_torque:=false` で起動すると、**トルクを入れず指令も書きません。**
@@ -249,6 +270,7 @@ robot.launchが実行中だと失敗することに注意してください。
 ```bash
 make release BUS_MODE=split   # split機
 make release BUS_MODE=shared  # shared機
+make release BUS_MODE=base    # アームを取り外した機体（ホイールだけ）
 ```
 
 ---
