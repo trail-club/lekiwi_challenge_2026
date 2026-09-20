@@ -21,6 +21,30 @@ def test_makefile_has_only_explicit_run_commands():
     assert "require-bus-mode" in makefile
 
 
+def test_launch_port_defaults_match_what_docker_mounts():
+    """launch の既定ポート名と docker が bind mount する名前を揃える。
+
+    ★ ずれていると sllidar_node や base_driver **だけ**が黙って死ぬ。
+      launch 全体は上がるので気付きにくい (/scan が出ず、slam_toolbox が
+      map->odom を出さず、Nav2 が Invalid frame ID map を INFO で吐き続ける)。
+    ★ /dev/ttyUSB0 のような番号付きの名前を既定にしないこと。挿し直すと変わる。
+    """
+    compose = (ROOT / "docker/robot/compose.yaml").read_text()
+    assert "${RPLIDAR_DEVICE:-/dev/rplidar}" in compose
+    for overlay in ("compose.split.yaml", "compose.shared.yaml", "compose.base.yaml"):
+        text = (ROOT / "docker/robot" / overlay).read_text()
+        assert "${LEKIWI_DEVICE:-/dev/lekiwi}" in text, overlay
+
+    for name in ("nav.launch.py", "nav_with_map.launch.py"):
+        launch = (
+            ROOT / "ros2_ws/src/lekiwi_base_bringup/launch" / name
+        ).read_text()
+        assert 'DeclareLaunchArgument("port", default_value="/dev/lekiwi"' in launch, name
+        assert (
+            'DeclareLaunchArgument("serial_port", default_value="/dev/rplidar"' in launch
+        ), name
+
+
 def test_combined_launch_requires_mode_and_selects_bridge_backend():
     launch = (
         ROOT

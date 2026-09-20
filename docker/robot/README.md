@@ -164,6 +164,17 @@ docker compose exec -it robot /entrypoint.sh \
     port:=/dev/lekiwi serial_port:=/dev/rplidar
 ```
 
+> ★ `port` と `serial_port` の既定は `/dev/lekiwi` と `/dev/rplidar` で、
+> compose が bind mount する名前と一致しています。手で叩くなら
+> **`ros2 launch lekiwi_base_bringup nav.launch.py` だけで通ります。**
+> `make` が明示的に渡しているのは、`.env` で `LEKIWI_DEVICE` /
+> `RPLIDAR_DEVICE` を既定以外にした機体に追従するためです。
+>
+> ★ udev ルールを入れていない環境（`/dev/rplidar` が無い）では
+> `serial_port:=/dev/ttyUSB0` のように明示してください。ずれていると
+> **`sllidar_node` だけが黙って死に**、`/scan` が出ないまま launch は
+> 上がり続けます。
+
 | 項目 | アーム有り（`robot.launch.py`） | アーム無し（`lekiwi_base_bringup`） |
 | --- | --- | --- |
 | パッケージ | `lekiwi_so101_bringup`（合成） | **`lekiwi_base_bringup`** |
