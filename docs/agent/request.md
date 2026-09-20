@@ -28,7 +28,17 @@ ls -l /dev/lekiwi /dev/rplidar      # ★ /dev/so101_follower は無くてよい
 make bootstrap                      # 初回のみ
 
 # 2. ★ 車輪を浮かせる。ここから車輪が回りうる
-make run-base                       # 前面で走らせる（Ctrl+C で止める）
+make run-base                       # コンテナを上げてシェルへ入るだけ
+```
+
+シェルの中で launch を叩きます（画面に出ます。↑ キーでも呼び出せます）。
+**SSH など X が無い端末では `start_rviz:=false` にすること**
+（`DISPLAY` が空だと RViz だけ `could not connect to display` で落ちます）。
+
+```bash
+ros2 launch lekiwi_so101_bringup robot.launch.py \
+    start_arm:=false start_rviz:=false \
+    lekiwi_port:=/dev/lekiwi lidar_port:=/dev/rplidar
 ```
 
 別端末で:
@@ -58,6 +68,8 @@ make check-base
 
 - **`docker kill` を使わないこと。** 車輪が最後の指令速度で回り続けます。
   非常停止は**物理スイッチ**だけです
+- **シェルを `exit` する前に必ず launch を `Ctrl+C`。** シェルごと消えると
+  launch に SIGKILL が届き、停止処理（速度ゼロ + トルク OFF）が走りません
 - A-6 は**必ず車輪を浮かせてから**。`/cmd_vel` は 0.5 秒で失効しますが、
   機体が動き出す可能性があります
 - `make run-split` / `make run-shared` はこの機体では使えません
