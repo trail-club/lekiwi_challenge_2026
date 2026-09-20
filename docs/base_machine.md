@@ -54,22 +54,42 @@ make bootstrap        # 初回とパッケージ追加時
 
 ---
 
-## 4. 起動（SLAM）
+## 4. コンテナに入る
 
 ```bash
-make run-base
+make up-base          # コンテナを起動する（ロボットはまだ動かない）
+make shell            # コンテナに入る
 ```
 
-`Ctrl+C` で止める。**止める前に端末を閉じないこと**（SIGKILL では停止処理が
-走らず、ホイールが最後の指令速度で回り続ける）。
+以降のコマンドは**コンテナの中**で叩く。別端末が要るときは、もう一度
+`make shell` すればよい。
 
-X が無い端末では RViz が落ちるので付ける:
+---
+
+## 5. 起動（SLAM）
 
 ```bash
-make run-base START_RVIZ=false
+ros2 launch lekiwi_base_bringup nav.launch.py
 ```
 
-別端末での確認:
+`port` と `serial_port` の既定は `/dev/lekiwi` と `/dev/rplidar` なので引数は要らない。
+`.env` でデバイス名を変えた場合だけ渡す。
+
+```bash
+ros2 launch lekiwi_base_bringup nav.launch.py \
+    port:=/dev/lekiwi serial_port:=/dev/rplidar
+```
+
+X が無い端末では RViz が落ちるので切る。
+
+```bash
+ros2 launch lekiwi_base_bringup nav.launch.py start_rviz:=false
+```
+
+止めるのは `Ctrl+C`。**止める前にシェルを `exit` したり端末を閉じたりしないこと**
+（SIGKILL では停止処理が走らず、ホイールが最後の指令速度で回り続ける）。
+
+起動できたかの確認（ホスト側の別端末で）:
 
 ```bash
 make check-base
@@ -81,12 +101,11 @@ make check-base
 
 ---
 
-## 5. 走らせる
+## 6. 走らせる
 
 **★ 動作確認は車輪を浮かせてから。**
 
 ```bash
-# コンテナの中（別端末で make shell）
 ros2 topic pub --once /cmd_vel geometry_msgs/msg/Twist '{linear: {x: 0.05}}'
 ```
 
@@ -100,31 +119,34 @@ ros2 topic pub --once /goal_pose geometry_msgs/msg/PoseStamped \
 
 ---
 
-## 6. 地図を保存する
+## 7. 地図を保存する
 
-`make run-base` を**走らせたまま別端末で**。
+`nav.launch.py` を**走らせたまま別のシェルで**。
 
 ```bash
-make save-map                   # → /maps/my_room.yaml と .pgm
-make save-map MAP_NAME=living   # → /maps/living.yaml
+ros2 run lekiwi_base_bringup save_map            # → /maps/my_room.yaml と .pgm
+ros2 run lekiwi_base_bringup save_map living     # → /maps/living.yaml
+ros2 run lekiwi_base_bringup save_map /tmp/test  # / で始めれば絶対パス
 ```
 
 | | パス |
 | --- | --- |
-| コンテナ内 | `/maps/<MAP_NAME>.yaml` と `.pgm` |
-| ホスト | `$MAP_DIR/<MAP_NAME>.yaml`（既定 `~/maps`） |
+| コンテナ内 | `/maps/<名前>.yaml` と `.pgm` |
+| ホスト | `$MAP_DIR/<名前>.yaml`（既定 `~/maps`） |
 
-★ 保存できるのは `make run-base`（SLAM）の間だけ。`run-base-map` にはこの
-サービスが無い。
+★ 保存できるのは `nav.launch.py`（SLAM）の間だけ。`/map_saver/save_map` を出して
+いるのはこの launch が起動する `map_saver_server` で、`nav_with_map.launch.py`
+（AMCL）側には無い。
 
 ---
 
-## 7. 保存地図で走る（AMCL）
+## 8. 保存地図で走る（AMCL）
 
 ```bash
-make run-base-map MAP_NAME=my_room
-make run-base-map MAP_FILE=/maps/other.yaml   # パスを直接指定する場合
+ros2 launch lekiwi_base_bringup nav_with_map.launch.py map_file:=/maps/my_room.yaml
 ```
+
+`map_file` は**必須引数**。忘れると launch が即座に拒否する。
 
 起動後、**RViz の "2D Pose Estimate" で初期姿勢を与える**。
 
@@ -135,10 +157,28 @@ make run-base-map MAP_FILE=/maps/other.yaml   # パスを直接指定する場�
 
 ---
 
-## 8. 停止
+## 9. 実機なし（Mac でも動く）
+
+シリアルも LiDAR も開かない。`base_driver` は dry_run、スキャンは `fake_scan`。
 
 ```bash
-# run-base の端末で Ctrl+C（ホイールの速度ゼロ + トルク OFF）
+cd docker/robot
+docker compose -f compose.mock.yaml up -d
+docker compose -f compose.mock.yaml exec -it robot-mock bash
+```
+
+```bash
+# コンテナの中
+ros2 launch lekiwi_base_bringup sim_nav.launch.py start_rviz:=false
+```
+
+---
+
+## 10. 停止
+
+```bash
+# launch を叩いたシェルで Ctrl+C（ホイールの速度ゼロ + トルク OFF）
+exit            # シェルを抜ける
 make down       # コンテナを片付ける
 ```
 
@@ -147,9 +187,9 @@ make down       # コンテナを片付ける
 
 ---
 
-## 9. 異常終了したとき
+## 11. 異常終了したとき
 
-launch が落ちた / SIGKILL された / ホイールが走り出した場合。
+launch が落ちた / SIGKILL された / ホイールが走り出した場合。**ホスト側で**:
 
 ```bash
 make release-check BUS_MODE=base    # 読むだけ。いまトルクが入っているか
@@ -161,29 +201,37 @@ make release BUS_MODE=base          # ホイールを止めてトルクを切る
 
 ---
 
+## よくある症状
+
+| ログ | 原因 |
+| --- | --- |
+| `ID 7/8/9: 応答なし` → `起動失敗: 応答しないモータ` | **サーボに電気が来ていない。** ポートは開けている。バッテリーのスイッチ・残量・12V の配線・デイジーチェーンを見る |
+| `Invalid frame ID "odom"` が `[INFO]` で延々出る | `base_driver` が居ない。★ INFO なのでエラーに見えないが、これは上の一次故障の結果 |
+| `Message Filter dropping message: frame 'laser_link'` | 同上。`odom` が無くスキャンを変換できない |
+| `rviz2: could not connect to display` | `DISPLAY` が空。`start_rviz:=false` で切るか、X のある端末から `make up-base` し直す（コンテナの `DISPLAY` は作成時に固定される） |
+| `/scan` が出ない | `sllidar_node` だけが死んでいる。`serial_port` と `/dev/rplidar` を確認 |
+
+---
+
 ## コマンド一覧
+
+ホスト側（`docker/robot` で）:
 
 | コマンド | 内容 |
 | --- | --- |
 | `make install-udev BUS_MODE=base` | `/dev/lekiwi` と `/dev/rplidar` の udev ルール |
 | `make build` / `make bootstrap` | イメージとワークスペース |
-| `make up-base` | コンテナだけ起動 |
-| `make run-base` | 起動（SLAM） |
-| `make run-base-map` | 起動（保存地図 + AMCL） |
-| `make mock-base` | 実機なし（シリアルも LiDAR も開かない） |
+| `make up-base` | コンテナを起動 |
 | `make shell` | コンテナに入る |
 | `make check-base` | ROS グラフの確認 |
-| `make save-map` | 地図の保存 |
 | `make release BUS_MODE=base` | 異常終了からの復帰 |
 | `make down` | コンテナの停止・削除 |
 
-`make run-base` の実体:
+コンテナの中:
 
-```bash
-ros2 launch lekiwi_base_bringup nav.launch.py \
-    port:=/dev/lekiwi serial_port:=/dev/rplidar
-```
-
-`port` と `serial_port` の既定は `/dev/lekiwi` と `/dev/rplidar` なので、
-コンテナの中で手で叩くなら引数は要らない。`make` が明示的に渡しているのは
-`.env` の `LEKIWI_DEVICE` / `RPLIDAR_DEVICE` を変えた機体に追従するため。
+| コマンド | 内容 |
+| --- | --- |
+| `ros2 launch lekiwi_base_bringup nav.launch.py` | 起動（SLAM） |
+| `ros2 launch lekiwi_base_bringup nav_with_map.launch.py map_file:=...` | 起動（保存地図 + AMCL） |
+| `ros2 launch lekiwi_base_bringup sim_nav.launch.py` | 実機なし |
+| `ros2 run lekiwi_base_bringup save_map [名前]` | 地図の保存 |
