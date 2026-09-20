@@ -155,6 +155,15 @@ ros2 launch lekiwi_base_bringup nav_with_map.launch.py map_file:=/maps/my_room.y
 走らせても直らない（`recovery_alpha_*` が 0 で大域再測位は無効）ので、
 大きく外れたら 2D Pose Estimate を打ち直す。
 
+止まったまま補正させたいときは、強制更新を叩く（1 回で 1 更新）。
+
+```bash
+ros2 service call /request_nomotion_update std_srvs/srv/Empty {}
+```
+
+★ 連打しないこと。同じスキャンを別々の観測として扱うので、粒子が潰れて
+**間違った姿勢に自信を持つ**。数回で直らなければ走らせるか打ち直す。
+
 ---
 
 ## 9. 実機なし（Mac でも動く）
@@ -235,3 +244,4 @@ make release BUS_MODE=base          # ホイールを止めてトルクを切る
 | `ros2 launch lekiwi_base_bringup nav_with_map.launch.py map_file:=...` | 起動（保存地図 + AMCL） |
 | `ros2 launch lekiwi_base_bringup sim_nav.launch.py` | 実機なし |
 | `ros2 run lekiwi_base_bringup save_map [名前]` | 地図の保存 |
+| `ros2 service call /request_nomotion_update std_srvs/srv/Empty {}` | AMCL を静止したまま 1 回更新 |
