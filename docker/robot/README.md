@@ -37,7 +37,7 @@ LiDAR / SLAM / Nav2 / SO-101 アーム / 手首カメラ（RealSense）を **1 �
          └ odom (base_driver のオドメトリ積分)
             └ base_footprint → base_link
                                ├ laser_link      ← RPLIDAR
-                               └ arm_mount_link  ← アーム無し機体はここまで
+                               └ arm_mount_link
                                   └ arm_base_link … arm_gripper_link
                                        ├ arm_gripper_frame_link  ← リーチの手先
                                        └ wrist_camera_mount_link
@@ -53,9 +53,8 @@ LiDAR / SLAM / Nav2 / SO-101 アーム / 手首カメラ（RealSense）を **1 �
 ```bash
 cd docker/robot
 cp .env.example .env      # ★ 先に実機に合わせて編集する
-make udev-dry-run BUS_MODE=base     # ★ 生成されるルールを表示するだけ（sudo 不要）
-make install-udev BUS_MODE=base    # .env の LEKIWI_SERIAL からホストルールを生成
-ls -l /dev/lekiwi /dev/rplidar     # ★ できたか確認
+make udev-dry-run BUS_MODE=shared
+make install-udev BUS_MODE=shared  # .env の LEKIWI_SERIAL からホストルールを生成
 make build
 make bootstrap            # ★ 初回とパッケージ追加時。上流取得 + colcon build + 静的検査
 ```
@@ -63,33 +62,6 @@ make bootstrap            # ★ 初回とパッケージ追加時。上流取得
 split機では `.env` の `LEKIWI_SERIAL` と `SO101_SERIAL` を設定し、
 `make install-udev BUS_MODE=split` を使います。機体固有のシリアルを追跡対象の
 `.rules` へ直接書かないでください。
-
-アーム無し専用機は `BUS_MODE=base` です。`LEKIWI_SERIAL` だけ設定すれば足ります
-（`SO101_SERIAL` は空のままでよく、検査もされません）。
-
-| `BUS_MODE` | 機体 | 必須の `.env` | 作るルール | 作る symlink |
-| --- | --- | --- | --- | --- |
-| `split` | アーム 7.4V + ホイール 12V。ポート 2 本 | `LEKIWI_SERIAL` + `SO101_SERIAL` | lekiwi / rplidar / so101 | `/dev/lekiwi` `/dev/rplidar` `/dev/so101_follower` |
-| `shared` | 全モータ 12V、canonical ID 1〜9 を 1 本で | `LEKIWI_SERIAL` | lekiwi / rplidar | `/dev/lekiwi` `/dev/rplidar` |
-| `base` | **アーム無し専用機** | `LEKIWI_SERIAL` | lekiwi / rplidar | `/dev/lekiwi` `/dev/rplidar` |
-
-> ★ **LeKiwi と SO-101 の基板は VID:PID が同一**（WaveShare、`1a86:55d3`）です。
-> だから両方のルールが `ATTRS{serial}` で識別しています。VID:PID で書くと
-> `/dev/lekiwi` と `/dev/so101_follower` が「最後に認識された方」の同じ基板を
-> 指してしまいます。**アームを外しても `/dev/lekiwi` が別の基板を掴むことはありません。**
->
-> ★ **既にある `99-so101.rules` は消しません。** 別機体との併用を壊さないためです。
-> アームの基板が挿さっていなければルールは一致せず、`/dev/so101_follower` は
-> できないので実害はありません。消したいなら手で:
->
-> ```bash
-> sudo rm /etc/udev/rules.d/99-so101.rules
-> sudo udevadm control --reload-rules && sudo udevadm trigger --subsystem-match=tty
-> ```
->
-> ★ RPLIDAR のルールだけは VID:PID（CP210x `10c4:ea60`）で書いています。
-> **同じ CP210x を他にも挿していると `/dev/rplidar` がそちらを指しえます。**
-> `udevadm info` で確認してください。
 
 `make bootstrap` は `ros2_ws` をホストからマウントしたまま `colcon build
 --symlink-install` する。成果物はホスト側の `ros2_ws/build`・`install` に残るので、
@@ -102,14 +74,6 @@ make run-split SO101_ROBOT_ID=my_follower
 make run-shared LEKIWI_ROBOT_ID=my_lekiwi
 make mock-split
 make mock-shared
-```
-
-アーム無し専用機は別系統です（`robot.launch.py` を使いません。下記）。
-
-```bash
-make run-base
-make run-base-map MAP_FILE=/maps/my_room.yaml
-make mock-base
 ```
 
 splitは `robots/so_follower/<SO101_ROBOT_ID>.json`、sharedは
@@ -154,112 +118,6 @@ ros2 コマンドを使うときは別端末で:
 make shell        # docker compose exec -it robot bash
 ```
 
-### ★ アーム無し専用機
-
-```bash
-make run-base                                   # 実機 + SLAM
-make run-base-map MAP_FILE=/maps/my_room.yaml   # 実機 + 保存地図 + AMCL
-make mock-base                                  # 実機なし
-make check-base                                 # 健全性チェック（期待値が make check と違う）
-```
-
-**★ `robot.launch.py` は使いません。** あれは `lekiwi_so101_bringup`（結合 URDF +
-アーム）のものです。アームが無ければ `lekiwi_base_bringup` の launch がそのまま
-答えになります。どれもベース単体 URDF を使い、`robot_state_publisher` と RViz を
-自分で持ちます。
-
-| `make` | 実体 | 起動するもの |
-| --- | --- | --- |
-| `run-base` | `lekiwi_base_bringup nav.launch.py` | base_driver + scan_filter + sllidar + **slam_toolbox** + Nav2 + map_saver |
-| `run-base-map` | `lekiwi_base_bringup nav_with_map.launch.py` | slam_toolbox の代わりに **map_server + AMCL** |
-| `mock-base` | `lekiwi_base_bringup sim_nav.launch.py` | base_driver は dry_run、スキャンは fake_scan |
-
-`make run-base` の実体:
-
-```bash
-docker compose -f compose.yaml -f compose.base.yaml up -d
-docker compose exec -it robot /entrypoint.sh \
-  ros2 launch lekiwi_base_bringup nav.launch.py \
-    port:=/dev/lekiwi serial_port:=/dev/rplidar
-```
-
-> ★ `port` と `serial_port` の既定は `/dev/lekiwi` と `/dev/rplidar` で、
-> compose が bind mount する名前と一致しています。手で叩くなら
-> **`ros2 launch lekiwi_base_bringup nav.launch.py` だけで通ります。**
-> `make` が明示的に渡しているのは、`.env` で `LEKIWI_DEVICE` /
-> `RPLIDAR_DEVICE` を既定以外にした機体に追従するためです。
->
-> ★ udev ルールを入れていない環境（`/dev/rplidar` が無い）では
-> `serial_port:=/dev/ttyUSB0` のように明示してください。ずれていると
-> **`sllidar_node` だけが黙って死に**、`/scan` が出ないまま launch は
-> 上がり続けます。
-
-| 項目 | アーム有り（`robot.launch.py`） | アーム無し（`lekiwi_base_bringup`） |
-| --- | --- | --- |
-| パッケージ | `lekiwi_so101_bringup`（合成） | **`lekiwi_base_bringup`** |
-| URDF | 結合 URDF | **ベース単体 URDF**（`lekiwi_description`） |
-| `robot_state_publisher` / RViz | `arm.launch.py` が持つ | **その launch 自身が持つ** |
-| `motor_bus_mode` | **必須** | 引数自体が無い |
-| `hardware_backend` | shared なら `bridge` | 既定の `serial`（`/dev/lekiwi` の ID 7/8/9） |
-| SLAM / AMCL の切り替え | `use_saved_map:=true` | **呼ぶ launch ファイルを変える** |
-| 手首カメラ | 起動する | 起動しない（親の `arm_gripper_link` が無い） |
-| `/joint_states` の publisher | 2 | **1**（車輪 3 関節のみ） |
-| ros2_control | 3 コントローラが active | 起動しない |
-| compose | `compose.split.yaml` / `compose.shared.yaml` | **`compose.base.yaml`**（`/dev/so101_follower` を mount しない） |
-| 停止 | アームを低くしてから `Ctrl+C` | `Ctrl+C` だけでよい |
-| 異常終了からの復帰 | `make release BUS_MODE=split\|shared` | **`make release BUS_MODE=base`** |
-
-> ★ `compose.base.yaml` が要るのは、アーム無し機体に `/dev/so101_follower` が
-> 無いからです。`compose.split.yaml` のまま起動すると
-> `bind source path does not exist` でコンテナが上がりません。
->
-> ★ `BUS_MODE=base` に `compose.shared.yaml` を流用しないこと。
-> `make release BUS_MODE=shared` はアームの ID 1〜6 も探しに行き、
-> 居ないので失敗します。`BUS_MODE=base` は `release_all` へ
-> `--bus-mode split --only wheels` として渡ります。
->
-> ★ `map_file` は `nav_with_map.launch.py` の**必須引数**です。忘れると
-> launch が即座に拒否します（起動してから map_server が失敗するのではない）。
-
-#### 地図を作って保存する
-
-1. `make run-base` で SLAM を走らせ、機体を動かして地図を作る
-2. **走らせたまま別端末で** `make save-map`
-3. 以後は `make run-base-map` で AMCL に切り替える
-
-```bash
-make save-map                   # → /maps/my_room.yaml と .pgm
-make save-map MAP_NAME=living   # → /maps/living.yaml
-```
-
-| | パス |
-| --- | --- |
-| コンテナ内 | `/maps/<MAP_NAME>.yaml` と `.pgm` |
-| ホスト | `$MAP_DIR/<MAP_NAME>.yaml`（既定 `~/maps`。`compose.yaml` が `/maps` へ mount） |
-
-`MAP_NAME` は `run-base-map` も読みます（`MAP_FILE` の既定が
-`/maps/$(MAP_NAME).yaml`）。保存時と同じ名前を渡せばパスを書かずに済みます。
-
-```bash
-make save-map     MAP_NAME=living
-make run-base-map MAP_NAME=living   # = MAP_FILE=/maps/living.yaml
-```
-
-> ★ **保存できるのは `make run-base`（SLAM）で走っている間だけ。**
-> `make save-map` が呼ぶ `/map_saver/save_map` は、`nav.launch.py` が
-> `start_slam:=true`（既定）のときに起動する `map_saver_server` が提供します。
-> `run-base-map`（AMCL）側は nav2 の `bringup_launch.py` を使うので
-> このサービスがありません。
->
-> ★ `nav2_map_server` の `map_saver_cli` を直接使うなら
-> `save_map_timeout` を伸ばすこと。既定の 2.0 秒ではこの環境で discovery が
-> 間に合わず `Failed to spin map subscription` で失敗します。
->
-> ```bash
-> ros2 run nav2_map_server map_saver_cli -f /maps/my_room \
->   --ros-args -p save_map_timeout:=10.0
-> ```
-
 ### `robot.launch.py` の主な引数
 
 | 引数 | 既定 | 意味 |
@@ -299,7 +157,7 @@ ros2_controlでアームを安全な低い姿勢へ移してから停止して�
 | --- | --- |
 | いますぐ全部止めたい | **物理スイッチ（電源）を切る** |
 | ソフト的に安全に止めたい | アームを低くする（reach起動中なら `make stow`）→ launchを `Ctrl+C` |
-| 走り出したホイールだけ止めたい | **`make release-wheels BUS_MODE=split\|shared\|base`** |
+| 走り出したホイールだけ止めたい | **`make release-wheels BUS_MODE=split|shared`** |
 
 ## ★ 異常終了したとき何が起きるか
 
@@ -328,7 +186,6 @@ ros2_controlでアームを安全な低い姿勢へ移してから停止して�
 make release-check BUS_MODE=shared
 make release BUS_MODE=shared
 make release-wheels BUS_MODE=shared
-make release BUS_MODE=base      # ★ アームを取り外した機体（ホイールだけ）
 ```
 
 いちばん多い故障は「**launch だけが落ちて、コンテナは生きている**」で、
@@ -404,8 +261,7 @@ launch 全体が落ちた場合（SIGKILL）は前節を参照。
 ## 健全性チェック
 
 ```bash
-make check         # アーム有り
-make check-base    # ★ アーム無し専用機
+make check
 ```
 
 - `/robot_description` の publisher = **1**（2 だと RViz に別のロボットが出る）
@@ -414,14 +270,6 @@ make check-base    # ★ アーム無し専用機
 - **`ros2 action list` に `navigate_to_pose` と `follow_joint_trajectory` が同時に見える**
   ← 分割時は別コンテナだったのでこれができなかった
 - `map → arm_gripper_frame_link` と `map → wrist_camera_depth_optical_frame` の TF
-
-`make check-base` は期待値が違います。
-
-- `/robot_description` の publisher = **1**（ベース側の RSP が唯一の持ち主）
-- `/joint_states` の publisher = **1**（車輪 3 関節のみ）
-- **アームのノード（`so101*` / `controller_manager`）が 1 つも居ない**
-- `ros2 action list` に `navigate_to_pose` が見える
-- `map → base_footprint` と `base_link → laser_link` の TF
 
 ## インターフェース・CLI テストコマンド
 
