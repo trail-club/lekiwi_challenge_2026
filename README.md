@@ -206,33 +206,19 @@ make run-split SO101_ROBOT_ID=my_follower
 make run-shared LEKIWI_ROBOT_ID=my_lekiwi
 ```
 
-**★ `make` はロボットを起動しません。** コンテナを上げて**シェルへ入るだけ**です。
-入室時にそのモードの launch コマンドが画面に出るので、**シェルの中でそれを叩きます**
-（コンテナの bash 履歴にも入っているので **↑ キー**で出ます）。
-
-```
-root@robot:/# ros2 launch lekiwi_so101_bringup robot.launch.py \
-    motor_bus_mode:=split backend:=lerobot robot_id:=my_follower ...
-```
-
-引数はその場で書き換えられます。たとえば X が無い端末（SSH など）では
-`start_rviz:=false` に直してください。`DISPLAY` が空だと RViz だけ
-`could not connect to display` で落ちます（他のノードは生き残ります）。
-
-コンテナだけ起動する場合は `make up-split` / `make up-shared`、
-モードに依らない素のシェルへ入る場合は `make shell` です。
+どちらもコンテナを起動した後、`motor_bus_mode` と4章の較正IDを渡して
+`robot.launch.py` を前面実行します。コンテナだけ起動する場合は
+`make up-split` / `make up-shared`、シェルへ入る場合は `make shell` です。
 
 ### アームを取り外した機体
 
 ```bash
 make run-base
-# シェルの中で（↑ キーで出ます）
-ros2 launch lekiwi_so101_bringup robot.launch.py start_arm:=false
 ```
 
-ベース・LiDAR・SLAM・Nav2 だけを起動します。`motor_bus_mode` も較正 ID も
-要りません。トルクの入るサーボが車輪だけなので、**停止は `Ctrl+C` だけ**でよく、
-アームを低くする手順は不要です。
+ベース・LiDAR・SLAM・Nav2 だけを起動します（`robot.launch.py start_arm:=false`）。
+`motor_bus_mode` も較正 ID も要りません。トルクの入るサーボが車輪だけなので、
+**停止は `Ctrl+C` だけ**でよく、アームを低くする手順は不要です。
 
 - URDF はベース単体のものになり、アームのリンクは最初から存在しません
 - 手首カメラ（RealSense）は `arm_gripper_link` に付くので起動しません
@@ -268,11 +254,6 @@ ros2 topic echo /joint_states
 ### 終了方法
 
 launchをctrl + cで終了。（トルクが落ちることに注意）
-そのあとシェルを `exit` します。
-
-> ★ **シェルを `exit` したり端末を閉じたりする前に、必ず launch を `Ctrl+C`。**
-> シェルごと消えると launch には SIGKILL が届き、停止処理が走りません
-> （アームは凍り、**ホイールは最後の指令速度で回り続けます**）。
 
 コンテナを閉じる場合は
 

@@ -21,34 +21,6 @@ def test_makefile_has_only_explicit_run_commands():
     assert "require-bus-mode" in makefile
 
 
-def _recipe(makefile: str, target: str) -> str:
-    """Makefile から 1 つのターゲットのレシピ本文だけを取り出す。"""
-    body = makefile.split(f"\n{target}:", 1)[1]
-    lines = []
-    for line in body.splitlines()[1:]:
-        if line and not line.startswith("\t"):
-            break
-        lines.append(line)
-    return "\n".join(lines)
-
-
-def test_make_targets_only_enter_a_shell():
-    """make は launch を起動しない。コンテナを上げてシェルへ入るだけ。
-
-    ★ ここが崩れると **make を叩いた瞬間にトルクが入る**。
-      launch はシェルの中で人が叩く (引数が起動ごとに変わるため)。
-    """
-    makefile = (ROOT / "docker/robot/Makefile").read_text()
-    for target in ("run-split", "run-shared", "run-base",
-                   "mock-split", "mock-shared", "mock-base"):
-        recipe = _recipe(makefile, target)
-        assert "$(call enter_shell," in recipe, target
-        assert "ros2 launch" not in recipe, target
-    # シェルへ入る動作そのものは enter_shell が 1 か所で持つ。
-    enter_shell = makefile.split("define enter_shell", 1)[1].split("endef", 1)[0]
-    assert "exec -it $(2) bash" in enter_shell
-
-
 def test_combined_launch_requires_mode_and_selects_bridge_backend():
     launch = (
         ROOT

@@ -5,15 +5,11 @@
 #   make bootstrap   ★ 初回とパッケージ追加時。上流取得 + colcon build + 静的検査
 #   make install-udev BUS_MODE=shared|split|base  .env からホストudevルールを生成
 #   make up-split / make up-shared / make up-base  コンテナだけ起動
-#
-#   ★ run-* / mock-* は **コンテナを上げてシェルへ入るだけ**。launch は
-#     シェルの中で人が叩く。入室時にそのモードのコマンドを画面へ出し、
-#     bash 履歴にも入れてある (シェルで ↑ キー)。
 #   make run-split SO101_ROBOT_ID=my_follower
 #   make run-shared LEKIWI_ROBOT_ID=my_lekiwi
 #   make run-base    ★ アームを取り外した機体 (ベース + LiDAR だけ)
 #   make mock-split / make mock-shared / make mock-base
-#   make shell       コンテナに入る (モードに依らない素のシェル)
+#   make shell       コンテナに入る
 #   make stow        reach.launch.py起動中にアームを低く畳む
 #   make save-map    現在の地図を保存
 #   make check       ROS グラフの不変条件を確認
@@ -23,7 +19,7 @@
 #   make down        コンテナを停止・削除
 #
 # ■ 停止
-#   通常  : アームを安全な低い姿勢にしてからlaunchを叩いた端末でCtrl+C
+#   通常  : アームを安全な低い姿勢にしてからrun端末でCtrl+C
 #   非常時: **物理スイッチを切る。** docker kill は使わない
 #           (SIGKILL では停止処理が走らず、ホイールは最後の指令速度で回り続ける)
 #   異常終了からの復帰: launchを止めて make release BUS_MODE=split|shared|base
@@ -155,73 +151,55 @@ up-base: guard preflight-base-devices
 	mkdir -p $(MAP_DIR)
 	docker compose -f compose.yaml -f compose.base.yaml up -d
 
-# ★★ make は launch を起動しない。**コンテナを上げてシェルへ入るだけ。**
-#
-#   理由は compose.yaml の command: bash と同じ。
-#     1. make を叩いた瞬間にロボットが動き出さないようにする
-#     2. 起動のたびに引数が変わる (backend / robot_id / sim / use_saved_map /
-#        start_rviz)。make の変数越しに渡すと、何が効いているのか分からなくなる
-#
-#   そのモードの launch コマンドは入室時に画面へ出し、コンテナの bash 履歴へも
-#   入れてある。シェルの中で **↑ キー** を押せば出てくる。
-#
-# ★ 停止は launch を Ctrl+C。Ctrl+C が届いてはじめて停止処理
+# ★ 前面で走らせること。Ctrl+C が launch に届いてはじめて停止処理
 #   (アームのトルク OFF + ホイールの速度ゼロ) が走る。
 #   docker compose down では届かない。
-
-# ★ launch コマンドの定義はここだけ。画面表示と bash 履歴の両方がこれを読む。
-#   ここを直せば両方直る (二重管理にしない)。
-LAUNCH     := ros2 launch lekiwi_so101_bringup robot.launch.py
-LAUNCH_SPLIT  = $(LAUNCH) motor_bus_mode:=split backend:=$(BACKEND) robot_id:=$(SO101_ROBOT_ID) start_rviz:=$(START_RVIZ) lekiwi_port:=$(LEKIWI_DEVICE) usb_port:=$(SO101_DEVICE) lidar_port:=$(RPLIDAR_DEVICE)
-LAUNCH_SHARED = $(LAUNCH) motor_bus_mode:=shared backend:=$(BACKEND) robot_id:=$(LEKIWI_ROBOT_ID) start_rviz:=$(START_RVIZ) lekiwi_port:=$(LEKIWI_DEVICE) lidar_port:=$(RPLIDAR_DEVICE)
-LAUNCH_BASE   = $(LAUNCH) start_arm:=false start_rviz:=$(START_RVIZ) lekiwi_port:=$(LEKIWI_DEVICE) lidar_port:=$(RPLIDAR_DEVICE)
-MOCK_LAUNCH_SPLIT  = $(LAUNCH) motor_bus_mode:=split sim:=true backend:=mock start_rviz:=$(MOCK_START_RVIZ) mock_wrist_camera_optical:=true
-MOCK_LAUNCH_SHARED = $(LAUNCH) motor_bus_mode:=shared sim:=true backend:=mock start_rviz:=$(MOCK_START_RVIZ) mock_wrist_camera_optical:=true
-MOCK_LAUNCH_BASE   = $(LAUNCH) start_arm:=false sim:=true start_rviz:=$(MOCK_START_RVIZ)
-
-# コンテナへ入る。$(1)=compose のファイル指定, $(2)=サービス名, $(3)=launch コマンド。
-#
-# ★ bash 履歴への追記は失敗しても無視する (あれば便利、という程度のもの)。
-# ★ シェルは $(E) を前置しない。イメージの /etc/bash.bashrc が
-#   ROS -> ワークスペース -> venv を source するので、対話シェルでは ros2 が通る。
-define enter_shell
-	@echo ""
-	@echo "════════════════════════════════════════════════════════════════"
-	@echo " コンテナ $(2) に入ります。**launch はシェルの中で自分で叩く**："
-	@echo ""
-	@echo "   $(3)"
-	@echo ""
-	@echo " ↑ キーで上のコマンドが出ます。"
-	@echo " ★ 停止は launch を Ctrl+C。**端末を閉じる前に必ず Ctrl+C すること。**"
-	@echo "   SIGKILL ではホイールが最後の指令速度で回り続けます。"
-	@echo "════════════════════════════════════════════════════════════════"
-	-@docker compose $(1) exec -T $(2) bash -c 'printf "%s\n" "$(3)" >> /root/.bash_history' 2>/dev/null
-	docker compose $(1) exec -it $(2) bash
-endef
-
 run-split: up-split
-	$(call enter_shell,-f compose.yaml,$(SVC),$(LAUNCH_SPLIT))
+	docker compose -f compose.yaml exec -it $(SVC) $(E) \
+		ros2 launch lekiwi_so101_bringup robot.launch.py \
+		motor_bus_mode:=split backend:=$(BACKEND) \
+		robot_id:=$(SO101_ROBOT_ID) start_rviz:=$(START_RVIZ) \
+		lekiwi_port:=$(LEKIWI_DEVICE) \
+		usb_port:=$(SO101_DEVICE) \
+		lidar_port:=$(RPLIDAR_DEVICE)
 
 run-shared: up-shared
-	$(call enter_shell,-f compose.yaml,$(SVC),$(LAUNCH_SHARED))
+	docker compose -f compose.yaml exec -it $(SVC) $(E) \
+		ros2 launch lekiwi_so101_bringup robot.launch.py \
+		motor_bus_mode:=shared backend:=$(BACKEND) \
+		robot_id:=$(LEKIWI_ROBOT_ID) start_rviz:=$(START_RVIZ) \
+		lekiwi_port:=$(LEKIWI_DEVICE) lidar_port:=$(RPLIDAR_DEVICE)
 
 # ★ アームを取り外した機体。motor_bus_mode は渡さない (アームが無ければ
 #   バスの分け方は関係なく、ベースが自分で /dev/lekiwi の ID 7/8/9 を開く)。
 #   robot_state_publisher と RViz はベース側が持つ。
 run-base: up-base
-	$(call enter_shell,-f compose.yaml,$(SVC),$(LAUNCH_BASE))
+	docker compose -f compose.yaml exec -it $(SVC) $(E) \
+		ros2 launch lekiwi_so101_bringup robot.launch.py \
+		start_arm:=false start_rviz:=$(START_RVIZ) \
+		lekiwi_port:=$(LEKIWI_DEVICE) \
+		lidar_port:=$(RPLIDAR_DEVICE)
 
 mock-split: guard-mock
 	docker compose -f compose.mock.yaml up -d
-	$(call enter_shell,-f compose.mock.yaml,$(SVC_MOCK),$(MOCK_LAUNCH_SPLIT))
+	docker compose -f compose.mock.yaml exec -it $(SVC_MOCK) $(E) \
+		ros2 launch lekiwi_so101_bringup robot.launch.py \
+		motor_bus_mode:=split sim:=true backend:=mock \
+		start_rviz:=$(MOCK_START_RVIZ) mock_wrist_camera_optical:=true
 
 mock-shared: guard-mock
 	docker compose -f compose.mock.yaml up -d
-	$(call enter_shell,-f compose.mock.yaml,$(SVC_MOCK),$(MOCK_LAUNCH_SHARED))
+	docker compose -f compose.mock.yaml exec -it $(SVC_MOCK) $(E) \
+		ros2 launch lekiwi_so101_bringup robot.launch.py \
+		motor_bus_mode:=shared sim:=true backend:=mock \
+		start_rviz:=$(MOCK_START_RVIZ) \
+		mock_wrist_camera_optical:=true
 
 mock-base: guard-mock
 	docker compose -f compose.mock.yaml up -d
-	$(call enter_shell,-f compose.mock.yaml,$(SVC_MOCK),$(MOCK_LAUNCH_BASE))
+	docker compose -f compose.mock.yaml exec -it $(SVC_MOCK) $(E) \
+		ros2 launch lekiwi_so101_bringup robot.launch.py \
+		start_arm:=false sim:=true start_rviz:=$(MOCK_START_RVIZ)
 
 shell:
 	docker compose -f compose.yaml exec -it $(SVC) bash

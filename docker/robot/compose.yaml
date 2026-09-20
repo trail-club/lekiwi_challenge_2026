@@ -4,9 +4,8 @@
 #   make build
 #   make bootstrap           # 初回とパッケージ追加時
 #   make up-split/up-shared  # コンテナを起動する (bash が上がるだけ)
-#   make run-split           # 2 バス機   ★ シェルへ入るだけ。launch は中で叩く
+#   make run-split           # 2 バス機
 #   make run-shared          # 12V・1 バス機
-#   make run-base            # アームを取り外した機体
 #
 # ■ なぜ 1 コンテナなのか
 #   以前は 4 コンテナに分けていた。理由は「アームとベースで安全論理が逆で、

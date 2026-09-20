@@ -262,7 +262,7 @@ echo "  launch の読み込み: OK"
 
 echo
 echo "== 完了 =="
-echo "以降は次でコンテナへ入れます (launch はシェルの中で叩く):"
+echo "以降は次で起動できます:"
 echo "  make run-split SO101_ROBOT_ID=my_follower"
 echo "  make run-shared LEKIWI_ROBOT_ID=my_lekiwi"
 echo "  make run-base                 # アームを取り外した機体"

@@ -78,8 +78,6 @@ split機では `.env` の `LEKIWI_SERIAL` と `SO101_SERIAL` を設定し、
 
 ## 動かし方
 
-**★ `make` は launch を起動しません。コンテナを上げてシェルへ入るだけです。**
-
 ```bash
 make run-split SO101_ROBOT_ID=my_follower
 make run-shared LEKIWI_ROBOT_ID=my_lekiwi
@@ -87,23 +85,6 @@ make run-base                  # ★ アームを取り外した機体
 make mock-split
 make mock-shared
 make mock-base
-```
-
-入室すると、そのモードの launch コマンドが画面に出ます。**シェルの中でそれを
-叩いてロボットを起動します。** コンテナの bash 履歴にも入れてあるので、
-**↑ キー**で呼び出せます。
-
-```
-════════════════════════════════════════════════════════════════
- コンテナ robot に入ります。**launch はシェルの中で自分で叩く**：
-
-   ros2 launch lekiwi_so101_bringup robot.launch.py start_arm:=false ...
-
- ↑ キーで上のコマンドが出ます。
- ★ 停止は launch を Ctrl+C。**端末を閉じる前に必ず Ctrl+C すること。**
-   SIGKILL ではホイールが最後の指令速度で回り続けます。
-════════════════════════════════════════════════════════════════
-root@robot:/#
 ```
 
 splitは `robots/so_follower/<SO101_ROBOT_ID>.json`、sharedは
@@ -124,36 +105,28 @@ sharedの固定配置は `7=left, 8=back, 9=right` です。異なるIDの較正
 
 ```bash
 docker compose -f compose.yaml -f compose.shared.yaml up -d
-docker compose exec -it robot bash
-# ここから先はシェルの中
-ros2 launch lekiwi_so101_bringup robot.launch.py \
+docker compose exec -it robot /entrypoint.sh \
+  ros2 launch lekiwi_so101_bringup robot.launch.py \
     motor_bus_mode:=shared backend:=lerobot robot_id:=my_lekiwi
 ```
 
-**launch を人が手で叩く**のは、理由が 2 つあります。
+**コンテナは bash を起動するだけで、launch は人が手で叩く。** 理由は 2 つ。
 
-1. `make` や `docker compose up -d` でロボットが動き出さないようにするため
+1. `docker compose up -d` でロボットが動き出さないようにするため
    （`command:` に launch を書くと**上げた瞬間にトルクが入る**）
-2. 起動のたびに引数が変わるため（`backend` / `robot_id` / `sim` /
-   `use_saved_map` / `start_rviz`）。`make` の変数越しに渡すと、
-   何が効いているのか分からなくなります
-
-> ★ 引数は画面に出たコマンドを**そのまま編集して**使ってください。
-> 例: X が無い端末では末尾を `start_rviz:=false` に直す
-> （`DISPLAY` が空だと RViz だけ `could not connect to display` で落ちます。
-> 他のノードは生き残ります）。
+2. 起動のたびに引数が変わるため（`backend` / `robot_id` / `sim` / `use_saved_map`）
 
 > ★★ **代償: `make down` だけでは止まらない。**
 > `docker compose down` が SIGTERM を送るのは **PID 1 だけ**で、
-> `exec` したシェルと launch には**届かず SIGKILL される**（実測で確認）。
+> `exec` した launch には**届かず SIGKILL される**（実測で確認）。
 > つまり **トルクが入ったまま残る**。
 > 必ず launch を `Ctrl+C` してから `make down` すること。復帰は
-> `make release BUS_MODE=split|shared|base`。
+> `make release BUS_MODE=split|shared`。
 
 ros2 コマンドを使うときは別端末で:
 
 ```bash
-make shell        # docker compose exec -it robot bash（モードに依らない素のシェル）
+make shell        # docker compose exec -it robot bash
 ```
 
 ### ★ アームを取り外した機体
@@ -164,13 +137,12 @@ make mock-base           # 実機なし
 make check-base          # 健全性チェック（期待値が make check と違う）
 ```
 
-`make run-base` はコンテナを上げてシェルへ入るだけです。実体:
+実体は `robot.launch.py start_arm:=false` です。
 
 ```bash
 docker compose -f compose.yaml -f compose.base.yaml up -d
-docker compose exec -it robot bash
-# ここから先はシェルの中（↑ キーでこれが出ます）
-ros2 launch lekiwi_so101_bringup robot.launch.py start_arm:=false
+docker compose exec -it robot /entrypoint.sh \
+  ros2 launch lekiwi_so101_bringup robot.launch.py start_arm:=false
 ```
 
 | 項目 | アーム有り | `start_arm:=false` |
@@ -215,14 +187,9 @@ ros2 launch lekiwi_so101_bringup robot.launch.py start_arm:=false
 ```bash
 # 1. reach.launch.pyを起動している場合、アームを低く畳む
 make stow
-# 2. アームを支え、launch を叩いたシェルで Ctrl+C
-#    （launch が止まったらそのシェルを exit する）
+# 2. アームを支え、make run-split/shared の端末で Ctrl+C
 make down      # 3. コンテナを片付ける
 ```
-
-> ★ **シェルを exit したり端末を閉じたりする前に、必ず launch を `Ctrl+C`。**
-> `exec` したシェルごと消えると launch には SIGKILL が届き、
-> **ホイールは最後の指令速度で回り続けます**。
 
 `robot.launch.py` 単独では `/so101/stow` を提供しません。`make stow` はサービスが
 無ければ直ちにエラーにします。その場合は使用中のアプリケーションまたは
@@ -239,7 +206,7 @@ ros2_controlでアームを安全な低い姿勢へ移してから停止して�
 | やりたいこと | 正しい手段 |
 | --- | --- |
 | いますぐ全部止めたい | **物理スイッチ（電源）を切る** |
-| ソフト的に安全に止めたい | アームを低くする（reach起動中なら `make stow`）→ launchを叩いたシェルで `Ctrl+C` |
+| ソフト的に安全に止めたい | アームを低くする（reach起動中なら `make stow`）→ launchを `Ctrl+C` |
 | 走り出したホイールだけ止めたい | **`make release-wheels BUS_MODE=split\|shared\|base`** |
 
 ## ★ 異常終了したとき何が起きるか
