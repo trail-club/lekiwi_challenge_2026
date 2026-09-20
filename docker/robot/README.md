@@ -53,8 +53,9 @@ LiDAR / SLAM / Nav2 / SO-101 アーム / 手首カメラ（RealSense）を **1 �
 ```bash
 cd docker/robot
 cp .env.example .env      # ★ 先に実機に合わせて編集する
-make udev-dry-run BUS_MODE=shared
-make install-udev BUS_MODE=shared  # .env の LEKIWI_SERIAL からホストルールを生成
+make udev-dry-run BUS_MODE=base     # ★ 生成されるルールを表示するだけ（sudo 不要）
+make install-udev BUS_MODE=base    # .env の LEKIWI_SERIAL からホストルールを生成
+ls -l /dev/lekiwi /dev/rplidar     # ★ できたか確認
 make build
 make bootstrap            # ★ 初回とパッケージ追加時。上流取得 + colcon build + 静的検査
 ```
@@ -63,14 +64,32 @@ split機では `.env` の `LEKIWI_SERIAL` と `SO101_SERIAL` を設定し、
 `make install-udev BUS_MODE=split` を使います。機体固有のシリアルを追跡対象の
 `.rules` へ直接書かないでください。
 
-アームを取り外した機体は `BUS_MODE=base` です。`LEKIWI_SERIAL` だけ設定します
-（生成されるルールは lekiwi と rplidar の 2 つ）。
+アーム無し専用機は `BUS_MODE=base` です。`LEKIWI_SERIAL` だけ設定すれば足ります
+（`SO101_SERIAL` は空のままでよく、検査もされません）。
 
-| `BUS_MODE` | 機体 | udev で作るルール |
-| --- | --- | --- |
-| `split` | アーム 7.4V + ホイール 12V。ポート 2 本 | lekiwi / rplidar / so101 |
-| `shared` | 全モータ 12V、canonical ID 1〜9 を 1 本で | lekiwi / rplidar |
-| `base` | **アームを取り外した機体** | lekiwi / rplidar |
+| `BUS_MODE` | 機体 | 必須の `.env` | 作るルール | 作る symlink |
+| --- | --- | --- | --- | --- |
+| `split` | アーム 7.4V + ホイール 12V。ポート 2 本 | `LEKIWI_SERIAL` + `SO101_SERIAL` | lekiwi / rplidar / so101 | `/dev/lekiwi` `/dev/rplidar` `/dev/so101_follower` |
+| `shared` | 全モータ 12V、canonical ID 1〜9 を 1 本で | `LEKIWI_SERIAL` | lekiwi / rplidar | `/dev/lekiwi` `/dev/rplidar` |
+| `base` | **アーム無し専用機** | `LEKIWI_SERIAL` | lekiwi / rplidar | `/dev/lekiwi` `/dev/rplidar` |
+
+> ★ **LeKiwi と SO-101 の基板は VID:PID が同一**（WaveShare、`1a86:55d3`）です。
+> だから両方のルールが `ATTRS{serial}` で識別しています。VID:PID で書くと
+> `/dev/lekiwi` と `/dev/so101_follower` が「最後に認識された方」の同じ基板を
+> 指してしまいます。**アームを外しても `/dev/lekiwi` が別の基板を掴むことはありません。**
+>
+> ★ **既にある `99-so101.rules` は消しません。** 別機体との併用を壊さないためです。
+> アームの基板が挿さっていなければルールは一致せず、`/dev/so101_follower` は
+> できないので実害はありません。消したいなら手で:
+>
+> ```bash
+> sudo rm /etc/udev/rules.d/99-so101.rules
+> sudo udevadm control --reload-rules && sudo udevadm trigger --subsystem-match=tty
+> ```
+>
+> ★ RPLIDAR のルールだけは VID:PID（CP210x `10c4:ea60`）で書いています。
+> **同じ CP210x を他にも挿していると `/dev/rplidar` がそちらを指しえます。**
+> `udevadm info` で確認してください。
 
 `make bootstrap` は `ros2_ws` をホストからマウントしたまま `colcon build
 --symlink-install` する。成果物はホスト側の `ros2_ws/build`・`install` に残るので、
