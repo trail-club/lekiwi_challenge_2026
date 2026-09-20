@@ -7,7 +7,8 @@
 #   make up-split / make up-shared / make up-base  コンテナだけ起動
 #   make run-split SO101_ROBOT_ID=my_follower
 #   make run-shared LEKIWI_ROBOT_ID=my_lekiwi
-#   make run-base    ★ アームを取り外した機体 (ベース + LiDAR だけ)
+#   make run-base     ★ アーム無し機体 (ベース + LiDAR + SLAM + Nav2)
+#   make run-base-map MAP_FILE=/maps/my_room.yaml   ★ 同上 + 保存地図 + AMCL
 #   make mock-split / make mock-shared / make mock-base
 #   make shell       コンテナに入る
 #   make stow        reach.launch.py起動中にアームを低く畳む
@@ -28,11 +29,21 @@
 # ■ BUS_MODE の 3 値
 #   split : アーム 7.4V を /dev/so101_follower、ホイール 12V を /dev/lekiwi
 #   shared: 全モータ 12V、canonical ID 1〜9 を /dev/lekiwi 1 本で持つ
-#   base  : ★ アームを取り外した機体。ホイール (と LiDAR) しか無い
+#   base  : ★ アーム無し専用機。ホイール (と LiDAR) しか無い
+#
+# ■ ★ アーム無し機体は robot.launch.py を使わない
+#   robot.launch.py は lekiwi_so101_bringup (結合 URDF + アーム) のもの。
+#   アームが無ければ lekiwi_base_bringup の launch がそのまま答えになる。
+#     nav.launch.py          実機 + SLAM
+#     nav_with_map.launch.py 実機 + 保存地図 + AMCL
+#     sim_nav.launch.py      実機なし (dry_run + fake_scan)
+#   どれもベース単体 URDF で robot_state_publisher と RViz を自分で持つ。
 
 -include .env
 
 MAP_NAME   ?= my_room
+# run-base-map が読む地図。make save-map で作ったものを指す。
+MAP_FILE   ?= /maps/$(MAP_NAME).yaml
 SVC        := robot
 SVC_MOCK   := robot-mock
 E          := /entrypoint.sh
@@ -73,7 +84,7 @@ CONFLICTS_FOR_REAL := $(LEGACY) $(SVC_MOCK)
 CONFLICTS_FOR_MOCK := $(LEGACY) $(SVC)
 
 .PHONY: build bootstrap install-udev udev-dry-run up-split up-shared up-base \
-        run-split run-shared run-base \
+        run-split run-shared run-base run-base-map \
         mock-split mock-shared mock-base shell stow save-map check check-base release \
         release-wheels release-check down logs guard guard-mock require-bus-mode \
         preflight-shared-devices preflight-split-devices preflight-base-devices
@@ -170,15 +181,29 @@ run-shared: up-shared
 		robot_id:=$(LEKIWI_ROBOT_ID) start_rviz:=$(START_RVIZ) \
 		lekiwi_port:=$(LEKIWI_DEVICE) lidar_port:=$(RPLIDAR_DEVICE)
 
-# ★ アームを取り外した機体。motor_bus_mode は渡さない (アームが無ければ
-#   バスの分け方は関係なく、ベースが自分で /dev/lekiwi の ID 7/8/9 を開く)。
-#   robot_state_publisher と RViz はベース側が持つ。
+# ★ アーム無し機体。robot.launch.py ではなく lekiwi_base_bringup を直接呼ぶ。
+#   結合 URDF もアームの ros2_control も要らないので、合成パッケージを通す
+#   理由が無い。ベースは /dev/lekiwi の ID 7/8/9 を自分で開く
+#   (hardware_backend の既定が serial)。robot_state_publisher と RViz も
+#   この launch が持つ (start_robot_state_publisher / start_rviz の既定が true)。
 run-base: up-base
 	docker compose -f compose.yaml exec -it $(SVC) $(E) \
-		ros2 launch lekiwi_so101_bringup robot.launch.py \
-		start_arm:=false start_rviz:=$(START_RVIZ) \
-		lekiwi_port:=$(LEKIWI_DEVICE) \
-		lidar_port:=$(RPLIDAR_DEVICE)
+		ros2 launch lekiwi_base_bringup nav.launch.py \
+		port:=$(LEKIWI_DEVICE) \
+		serial_port:=$(RPLIDAR_DEVICE) \
+		start_rviz:=$(START_RVIZ)
+
+# ★ 保存済み地図 + AMCL。slam_toolbox の代わりに map_server + amcl を使う。
+#   地図は make save-map で作る (MAP_DIR がホスト側、/maps がコンテナ側)。
+#   ★ map_file は nav_with_map.launch.py の**必須引数**。忘れると launch が
+#     即座に拒否する (起動してから map_server が失敗するのではない)。
+run-base-map: up-base
+	docker compose -f compose.yaml exec -it $(SVC) $(E) \
+		ros2 launch lekiwi_base_bringup nav_with_map.launch.py \
+		map_file:=$(MAP_FILE) \
+		port:=$(LEKIWI_DEVICE) \
+		serial_port:=$(RPLIDAR_DEVICE) \
+		start_rviz:=$(START_RVIZ)
 
 mock-split: guard-mock
 	docker compose -f compose.mock.yaml up -d
@@ -195,11 +220,13 @@ mock-shared: guard-mock
 		start_rviz:=$(MOCK_START_RVIZ) \
 		mock_wrist_camera_optical:=true
 
+# ★ アーム無し機体の実機なし版。base_driver は dry_run 固定、
+#   スキャンは fake_scan。シリアルも LiDAR も一切開かない。
 mock-base: guard-mock
 	docker compose -f compose.mock.yaml up -d
 	docker compose -f compose.mock.yaml exec -it $(SVC_MOCK) $(E) \
-		ros2 launch lekiwi_so101_bringup robot.launch.py \
-		start_arm:=false sim:=true start_rviz:=$(MOCK_START_RVIZ)
+		ros2 launch lekiwi_base_bringup sim_nav.launch.py \
+		start_rviz:=$(MOCK_START_RVIZ)
 
 shell:
 	docker compose -f compose.yaml exec -it $(SVC) bash
@@ -259,17 +286,26 @@ check:
 	echo "--- map -> arm_gripper_frame_link ---"; \
 	$(call echo_tf,$$C,map,arm_gripper_frame_link,RSP かコントローラが未起動)
 
-# ★ アームを取り外した機体むけ。check との違いは期待値だけ。
+# ★ アーム無し機体むけ。check との違いは期待値だけ。
 #   /joint_states の publisher は 1 (車輪 3 関節のみ)。ros2_control は起動しない
 #   ので controllers も follow_joint_trajectory も無いのが正しい。
+#
+# ★ 待ちループは 3 つ揃うまで回す。**Nav2 の action まで待つ**のが要点で、
+#   lifecycle の activate が最後に終わるため。トピックだけ見て先へ進むと
+#   「Nav2 が上がっていない」「map -> base_footprint が引けない」と
+#   出てしまい、本物の異常と区別できない。
+#   ★ `ros2 topic info` は未知のトピックで exit 1 を返す (実測)。
+#     Publisher 数を数えずに終了コードで判定し、docker exec を 1 周 1 回に
+#     まとめてある (ROS の CLI は 1 回ごとに discovery をやり直すので遅い)。
+#   ★ bash -c の引数を行継続で折り返さないこと。シングルクォートの中では
+#     バックスラッシュ+改行がそのまま残り、コマンドが壊れる。
 check-base:
 	@C=$$(docker ps -q -f name=^$(SVC)$$ -f name=^$(SVC_MOCK)$$ | head -1); \
 	test -n "$$C" || { echo "コンテナが動いていない" >&2; exit 1; }; \
 	echo "discovery を待っています..."; \
 	for i in $$(seq 1 30); do \
-	  n=$$(docker exec $$C $(E) ros2 topic info /joint_states 2>/dev/null \
-	       | sed -n 's/.*Publisher count: //p'); \
-	  [ "$$n" = "1" ] && break; sleep 2; \
+	  docker exec $$C $(E) bash -c 'ros2 topic info /robot_description >/dev/null 2>&1 && ros2 topic info /joint_states >/dev/null 2>&1 && ros2 action list 2>/dev/null | grep -q navigate_to_pose' && break; \
+	  sleep 2; \
 	done; \
 	echo "--- /robot_description (期待: 1) ---"; \
 	docker exec $$C $(E) ros2 topic info /robot_description | grep 'Publisher count'; \
@@ -277,7 +313,7 @@ check-base:
 	docker exec $$C $(E) ros2 topic info /joint_states | grep 'Publisher count'; \
 	echo "--- ★ アームのノードが居ないこと (期待: 何も出ない) ---"; \
 	docker exec $$C $(E) ros2 node list | grep -E 'so101|controller_manager' && \
-	  echo "  ★ アームのノードが残っている。start_arm:=false で起動していない" || \
+	  echo "  ★ アームのノードが残っている。robot.launch.py を起動していないか確認" || \
 	  echo "  OK"; \
 	echo "--- ★ nav2 の action が見えること ---"; \
 	docker exec $$C $(E) ros2 action list | grep -E 'navigate_to_pose' || \

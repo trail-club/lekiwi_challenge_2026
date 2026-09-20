@@ -8,8 +8,9 @@
 
 ## 何を確認してほしいか
 
-`robot.launch.py` に `start_arm:=false` を足しました。アームを外した機体で
-ベース・LiDAR・SLAM・Nav2 だけが上がることを確認してください。
+アーム無し専用機むけに `docker/robot` へ `compose.base.yaml` と
+`run-base` / `run-base-map` / `mock-base` / `check-base` / `BUS_MODE=base` を
+足しました。ベース・LiDAR・SLAM・Nav2 だけが上がることを確認してください。
 
 Mac では mock（`sim:=true`）までしか検証できていません。**実機で初めて分かるのは
 「シリアルを開いて車輪が回るか」と「LiDAR が出るか」の 2 つ**です。
@@ -28,7 +29,17 @@ ls -l /dev/lekiwi /dev/rplidar      # ★ /dev/so101_follower は無くてよい
 make bootstrap                      # 初回のみ
 
 # 2. ★ 車輪を浮かせる。ここから車輪が回りうる
-make run-base                       # 前面で走らせる（Ctrl+C で止める）
+#    ★ SSH など X が無い端末では START_RVIZ=false を付けること
+#      （DISPLAY が空だと RViz だけ could not connect to display で落ちる）
+make run-base START_RVIZ=false      # 前面で走らせる（Ctrl+C で止める）
+```
+
+`make run-base` の実体は `lekiwi_base_bringup` の launch です
+（`robot.launch.py` は使いません）。
+
+```bash
+ros2 launch lekiwi_base_bringup nav.launch.py \
+    port:=/dev/lekiwi serial_port:=/dev/rplidar start_rviz:=false
 ```
 
 別端末で:
@@ -53,6 +64,7 @@ make check-base
 | A-9 | `Ctrl+C` | 車輪が止まり、トレースバック無しで終わる |
 | A-10 | **`make release BUS_MODE=base`** | launch を止めてから実行。ホイールだけ解放し、アームの ID 1〜6 は探しに行かない |
 | A-11 | `make release-check BUS_MODE=base` | 読むだけ。A-10 の前後で `Torque_Enable` が変わる |
+| A-12 | `make run-base-map MAP_FILE=/maps/<保存した地図>.yaml` | `make save-map` で地図を作ったあと。map_server + AMCL が上がり、RViz の 2D Pose Estimate で収束する |
 
 ## ★ 気をつけること
 
@@ -65,6 +77,6 @@ make check-base
 
 ## 報告してほしいこと
 
-`docs/agent/report.md` に、A-1〜A-11 の結果を書いてください。
+`docs/agent/report.md` に、A-1〜A-12 の結果を書いてください。
 **動いたかどうかだけでなく、実際に出た値**（publisher 数、TF の並進、`/scan` の Hz）を
 そのまま貼ってください。失敗したものはログの該当行も。

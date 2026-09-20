@@ -210,26 +210,36 @@ make run-shared LEKIWI_ROBOT_ID=my_lekiwi
 `robot.launch.py` を前面実行します。コンテナだけ起動する場合は
 `make up-split` / `make up-shared`、シェルへ入る場合は `make shell` です。
 
-### アームを取り外した機体
+### アーム無し専用機
 
 ```bash
-make run-base
+make run-base                                   # SLAM
+make run-base-map MAP_FILE=/maps/my_room.yaml   # 保存地図 + AMCL
 ```
 
-ベース・LiDAR・SLAM・Nav2 だけを起動します（`robot.launch.py start_arm:=false`）。
-`motor_bus_mode` も較正 ID も要りません。トルクの入るサーボが車輪だけなので、
-**停止は `Ctrl+C` だけ**でよく、アームを低くする手順は不要です。
+ベース・LiDAR・SLAM・Nav2 だけを起動します。`motor_bus_mode` も較正 ID も
+要りません。トルクの入るサーボが車輪だけなので、**停止は `Ctrl+C` だけ**でよく、
+アームを低くする手順は不要です。
 
-- URDF はベース単体のものになり、アームのリンクは最初から存在しません
+**★ `robot.launch.py` は使いません。** あれは結合 URDF とアームのための launch
+です。アームが無ければ `lekiwi_base_bringup` の launch がそのまま答えになります。
+
+| `make` | 実体 |
+| --- | --- |
+| `run-base` | `ros2 launch lekiwi_base_bringup nav.launch.py port:=/dev/lekiwi serial_port:=/dev/rplidar` |
+| `run-base-map` | `ros2 launch lekiwi_base_bringup nav_with_map.launch.py map_file:=... 同上` |
+| `mock-base` | `ros2 launch lekiwi_base_bringup sim_nav.launch.py` |
+
+- URDF はベース単体のもので、アームのリンクは最初から存在しません
 - 手首カメラ（RealSense）は `arm_gripper_link` に付くので起動しません
 - 健全性チェックは `make check-base`（`make check` とは期待値が違います）
-- 異常終了からの復帰は `make release BUS_MODE=base`
+- 異常終了からの復帰は `make release BUS_MODE=base`（ホイールだけ解放します）
 
 > ★ udev ルールも `make install-udev BUS_MODE=base` です
 > （`LEKIWI_SERIAL` だけ設定すれば足ります）。
 >
 > 詳細は [`docker/robot/README.md`](docker/robot/README.md) の
-> 「★ アームを取り外した機体」。
+> 「★ アーム無し専用機」。
 
 ### 手でアームを動かして角度を読む
 
