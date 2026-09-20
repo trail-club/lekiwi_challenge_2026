@@ -234,6 +234,9 @@ make run-base-map MAP_FILE=/maps/my_room.yaml   # 保存地図 + AMCL
 - 手首カメラ（RealSense）は `arm_gripper_link` に付くので起動しません
 - 健全性チェックは `make check-base`（`make check` とは期待値が違います）
 - 異常終了からの復帰は `make release BUS_MODE=base`（ホイールだけ解放します）
+- 地図は `make run-base`（SLAM）で走らせたまま**別端末で** `make save-map`。
+  `/maps/<MAP_NAME>.yaml`（ホストは `$MAP_DIR`、既定 `~/maps`）に出ます。
+  `make run-base-map MAP_NAME=<同じ名前>` でそれを読みます
 
 > ★ udev ルールも `make install-udev BUS_MODE=base` です
 > （`LEKIWI_SERIAL` だけ設定すれば足ります）。

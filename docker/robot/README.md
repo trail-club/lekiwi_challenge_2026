@@ -191,6 +191,45 @@ docker compose exec -it robot /entrypoint.sh \
 > ★ `map_file` は `nav_with_map.launch.py` の**必須引数**です。忘れると
 > launch が即座に拒否します（起動してから map_server が失敗するのではない）。
 
+#### 地図を作って保存する
+
+1. `make run-base` で SLAM を走らせ、機体を動かして地図を作る
+2. **走らせたまま別端末で** `make save-map`
+3. 以後は `make run-base-map` で AMCL に切り替える
+
+```bash
+make save-map                   # → /maps/my_room.yaml と .pgm
+make save-map MAP_NAME=living   # → /maps/living.yaml
+```
+
+| | パス |
+| --- | --- |
+| コンテナ内 | `/maps/<MAP_NAME>.yaml` と `.pgm` |
+| ホスト | `$MAP_DIR/<MAP_NAME>.yaml`（既定 `~/maps`。`compose.yaml` が `/maps` へ mount） |
+
+`MAP_NAME` は `run-base-map` も読みます（`MAP_FILE` の既定が
+`/maps/$(MAP_NAME).yaml`）。保存時と同じ名前を渡せばパスを書かずに済みます。
+
+```bash
+make save-map     MAP_NAME=living
+make run-base-map MAP_NAME=living   # = MAP_FILE=/maps/living.yaml
+```
+
+> ★ **保存できるのは `make run-base`（SLAM）で走っている間だけ。**
+> `make save-map` が呼ぶ `/map_saver/save_map` は、`nav.launch.py` が
+> `start_slam:=true`（既定）のときに起動する `map_saver_server` が提供します。
+> `run-base-map`（AMCL）側は nav2 の `bringup_launch.py` を使うので
+> このサービスがありません。
+>
+> ★ `nav2_map_server` の `map_saver_cli` を直接使うなら
+> `save_map_timeout` を伸ばすこと。既定の 2.0 秒ではこの環境で discovery が
+> 間に合わず `Failed to spin map subscription` で失敗します。
+>
+> ```bash
+> ros2 run nav2_map_server map_saver_cli -f /maps/my_room \
+>   --ros-args -p save_map_timeout:=10.0
+> ```
+
 ### `robot.launch.py` の主な引数
 
 | 引数 | 既定 | 意味 |
