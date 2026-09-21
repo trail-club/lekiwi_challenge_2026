@@ -72,18 +72,11 @@ make shell            # コンテナに入る
 ros2 launch lekiwi_base_bringup nav.launch.py
 ```
 
-`port` と `serial_port` の既定は `/dev/lekiwi` と `/dev/rplidar` なので引数は要らない。
 `.env` でデバイス名を変えた場合だけ渡す。
 
 ```bash
 ros2 launch lekiwi_base_bringup nav.launch.py \
     port:=/dev/lekiwi serial_port:=/dev/rplidar
-```
-
-X が無い端末では RViz が落ちるので切る。
-
-```bash
-ros2 launch lekiwi_base_bringup nav.launch.py start_rviz:=false
 ```
 
 止めるのは `Ctrl+C`。**止める前にシェルを `exit` したり端末を閉じたりしないこと**
@@ -102,8 +95,6 @@ make check-base
 ---
 
 ## 6. 走らせる
-
-**★ 動作確認は車輪を浮かせてから。**
 
 ```bash
 ros2 topic pub --once /cmd_vel geometry_msgs/msg/Twist '{linear: {x: 0.05}}'
@@ -166,24 +157,7 @@ ros2 service call /request_nomotion_update std_srvs/srv/Empty {}
 
 ---
 
-## 9. 実機なし（Mac でも動く）
-
-シリアルも LiDAR も開かない。`base_driver` は dry_run、スキャンは `fake_scan`。
-
-```bash
-cd docker/robot
-docker compose -f compose.mock.yaml up -d
-docker compose -f compose.mock.yaml exec -it robot-mock bash
-```
-
-```bash
-# コンテナの中
-ros2 launch lekiwi_base_bringup sim_nav.launch.py start_rviz:=false
-```
-
----
-
-## 10. 停止
+## 9. 停止
 
 ```bash
 # launch を叩いたシェルで Ctrl+C（ホイールの速度ゼロ + トルク OFF）
@@ -196,7 +170,7 @@ make down       # コンテナを片付ける
 
 ---
 
-## 11. 異常終了したとき
+## 10. 異常終了したとき
 
 launch が落ちた / SIGKILL された / ホイールが走り出した場合。**ホスト側で**:
 
@@ -207,6 +181,49 @@ make release BUS_MODE=base          # ホイールを止めてトルクを切る
 
 **コンテナは落とさなくてよい。** 止まっている必要があるのは launch だけ。
 `BUS_MODE=base` はホイール（`/dev/lekiwi` の ID 7/8/9）しか触らない。
+
+---
+
+## 11. 動作確認でやってほしいこと
+
+以下の topic や機能の確認をしてみてください。
+
+### Hardware Interfaceなど
+
+| 対象 | 確認方法 |
+| --- | --- |
+| `/cmd_vel` | `ros2 topic pub` を叩く |
+| `/scan` | RViz で表示 |
+| `/scan_filtered` | RViz で表示 |
+| TF `odom → base_footprint` | RViz で表示 |
+
+### SLAM
+
+| 対象 | 確認方法 |
+| --- | --- |
+| `/map` | RViz で表示 |
+| TF `map → odom` | RViz で表示 |
+| マップの保存 | `ros2 run lekiwi_base_bringup save_map` |
+| Spotting | 適当な場所にロボットを動かし、`ros2 run tf2_ros tf2_echo` で `base_link` の座標を記録する |
+
+### Localization
+
+| 対象 | 確認方法 |
+| --- | --- |
+| マップの読み込み | `nav_with_map.launch.py` のオプション `map_file` を指定 |
+| TF `map → odom` | RViz で表示 |
+| `/initialpose` | RViz の "2D Pose Estimate" で初期位置を指定 |
+| `/request_nomotion_update` | `ros2 service call` を叩く |
+
+### Navigation
+
+| 対象 | 確認方法 |
+| --- | --- |
+| `/goal_pose` | RViz の "2D Goal Pose" |
+| Spotting した位置へ Navigation | Spotting で記録した位置を用いて `ros2 action send_goal /navigate_to_pose` |
+| `/plan` | RViz で表示（Global Planner の下の Path） |
+| `/global_costmap/costmap` | RViz で表示（Global Planner の下の Global Costmap） |
+| `/local_costmap/costmap` | RViz で表示（Controller の下の Local Costmap） |
 
 ---
 
@@ -242,6 +259,5 @@ make release BUS_MODE=base          # ホイールを止めてトルクを切る
 | --- | --- |
 | `ros2 launch lekiwi_base_bringup nav.launch.py` | 起動（SLAM） |
 | `ros2 launch lekiwi_base_bringup nav_with_map.launch.py map_file:=...` | 起動（保存地図 + AMCL） |
-| `ros2 launch lekiwi_base_bringup sim_nav.launch.py` | 実機なし |
 | `ros2 run lekiwi_base_bringup save_map [名前]` | 地図の保存 |
 | `ros2 service call /request_nomotion_update std_srvs/srv/Empty {}` | AMCL を静止したまま 1 回更新 |
