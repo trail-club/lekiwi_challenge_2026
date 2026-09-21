@@ -48,6 +48,39 @@ if [[ "$mode" == "split" ]]; then
   validate_serial SO101_SERIAL "${SO101_SERIAL:-}"
 fi
 
+report_installed() {
+  echo "udevルールをインストールしました ($mode)。"
+  if [[ "$mode" == "split" ]]; then
+    echo "確認: ls -l /dev/lekiwi /dev/so101_follower /dev/rplidar"
+  else
+    echo "確認: ls -l /dev/lekiwi /dev/rplidar"
+  fi
+}
+
+# 共用機 (dgx-spark など) には root 所有のヘルパーがあり、sudo が制限された
+# 一般ユーザーもこれだけは実行できる。ルールの中身はヘルパーが自分で持ち、
+# 受け取るのはモードとシリアルだけ。利用者が書き換えられるこのリポジトリの
+# ファイルを root で読ませないため (udev ルールは RUN+= で任意のコマンドを走らせる)。
+#   install-robot-udev [--dry-run] split|shared|base LEKIWI_SERIAL [SO101_SERIAL]
+# ヘルパーは下の処理 (/dev の同名ディレクトリの確認・ルールの配置・reload・
+# trigger) を一通り行う。--dry-run は root なしで動き、下と同じ形式で表示する。
+# ★ 共用機に入るのはヘルパーのルールで、下のテンプレートではない。
+#   テンプレートを変えたらヘルパー側 (trail-club/directory-access) も揃えること。
+helper=/usr/local/sbin/install-robot-udev
+if [[ -x "$helper" ]]; then
+  helper_args=("$mode" "$LEKIWI_SERIAL")
+  if [[ "$mode" == "split" ]]; then
+    helper_args+=("$SO101_SERIAL")
+  fi
+  if [[ "$dry_run" == true ]]; then
+    "$helper" --dry-run "${helper_args[@]}"
+    exit 0
+  fi
+  sudo "$helper" "${helper_args[@]}"
+  report_installed
+  exit 0
+fi
+
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 sed "s/@LEKIWI_SERIAL@/${LEKIWI_SERIAL}/g" "$lekiwi_template" > "$tmp_dir/99-lekiwi.rules"
@@ -90,9 +123,4 @@ fi
 
 sudo udevadm control --reload-rules
 sudo udevadm trigger --subsystem-match=tty
-echo "udevルールをインストールしました ($mode)。"
-if [[ "$mode" == "split" ]]; then
-  echo "確認: ls -l /dev/lekiwi /dev/so101_follower /dev/rplidar"
-else
-  echo "確認: ls -l /dev/lekiwi /dev/rplidar"
-fi
+report_installed
