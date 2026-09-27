@@ -28,11 +28,30 @@ RPLIDAR_DEVICE=/dev/serial/by-id/usb-Silicon_Labs_CP2102_…     # LiDAR
 SO101_DEVICE=         # 空のまま
 ```
 
-パスは `make serial-ids` の出力からコピーする。
+パスは `make serial-ids` の出力からコピーする。出力の例:
 
-★ **LiDAR の名前の末尾が `0001` なら、先にシリアル番号を書き換える。**
-RPLIDAR の USB 変換（CP2102）は全個体 `0001` で、このままでは別の機体の
-LiDAR と区別できない。手順は [`../README.md`](../README.md) の 3 章 ②。
+```
+lrwxrwxrwx 1 root root 13  9月 27 16:27 usb-1a86_USB_Single_Serial_5A7A017874-if00 -> ../../ttyACM1
+lrwxrwxrwx 1 root root 13  9月 27 16:31 usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_rplidar-1-if00-port0 -> ../../ttyUSB1
+```
+
+| 行の先頭 | 機器 |
+| --- | --- |
+| `usb-1a86_…` | ベースの基板 |
+| `usb-Silicon_Labs_CP2102_…` | LiDAR |
+
+各行の `->` の**左側**の名前を取り、先頭に `/dev/serial/by-id/` を付ける。
+右側の `ttyACM1` や `ttyUSB1` は挿す順番で変わるので使わない。
+上の例なら `.env` は次のようになる。
+
+```bash
+LEKIWI_DEVICE=/dev/serial/by-id/usb-1a86_USB_Single_Serial_5A7A017874-if00
+RPLIDAR_DEVICE=/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_rplidar-1-if00-port0
+```
+
+名前の末尾（`5A7A017874` や `rplidar-1`）が機器ごとのシリアル番号。
+PC に他の機体も繋がっていて同じ種類の行が複数ある場合は、自分の機体の
+USB を抜いて `make serial-ids` を打ち、消えた行が自分の機器。
 
 ★ `/dev/lekiwi` や `/dev/rplidar` を書かないこと。共用機では別の機体を
 指していることがある。
