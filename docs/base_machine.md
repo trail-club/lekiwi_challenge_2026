@@ -14,77 +14,29 @@ SO-101 アームを載せない機体の手順。**ベース + RPLIDAR + SLAM + 
 
 ## 1. `.env`
 
+共用機（trail-pc、dgx-spark）では、共有の設定をコピーする。
+
 ```bash
 cd docker/robot
-cp .env.example .env
+cp /srv/shared/scratch/lekiwi/robot.env .env
 ```
 
-書き換えるのは 3 つ。
+この `.env` には機体が 2 台書いてあり、3 章の `ROBOT=` で選ぶ。
 
-```bash
-DIALOUT_GID=20        # getent group dialout の GID
-LEKIWI_DEVICE=/dev/serial/by-id/usb-1a86_…                     # ベースの基板
-RPLIDAR_DEVICE=/dev/serial/by-id/usb-Silicon_Labs_CP2102_…     # LiDAR
-SO101_DEVICE=         # 空のまま
-```
+| `ROBOT` | ベースの基板 | LiDAR |
+| --- | --- | --- |
+| `1` | `5A7A017874` | `rplidar-1` |
+| `2` | `5A68011993` | `rplidar-2` |
 
-パスは `make serial-ids` の出力からコピーする。出力の例:
+共用機の udev ルールは設定済みなので、利用者が入れる必要は無い。
 
-```
-lrwxrwxrwx 1 root root 13  9月 27 16:27 usb-1a86_USB_Single_Serial_5A7A017874-if00 -> ../../ttyACM1
-lrwxrwxrwx 1 root root 13  9月 27 16:31 usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_rplidar-1-if00-port0 -> ../../ttyUSB1
-```
-
-| 行の先頭 | 機器 |
-| --- | --- |
-| `usb-1a86_…` | ベースの基板 |
-| `usb-Silicon_Labs_CP2102_…` | LiDAR |
-
-各行の `->` の**左側**の名前を取り、先頭に `/dev/serial/by-id/` を付ける。
-右側の `ttyACM1` や `ttyUSB1` は挿す順番で変わるので使わない。
-上の例なら `.env` は次のようになる。
-
-```bash
-LEKIWI_DEVICE=/dev/serial/by-id/usb-1a86_USB_Single_Serial_5A7A017874-if00
-RPLIDAR_DEVICE=/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_rplidar-1-if00-port0
-```
-
-名前の末尾（`5A7A017874` や `rplidar-1`）が機器ごとのシリアル番号。
-PC に他の機体も繋がっていて同じ種類の行が複数ある場合は、自分の機体の
-USB を抜いて `make serial-ids` を打ち、消えた行が自分の機器。
-
-★ `/dev/lekiwi` や `/dev/rplidar` を書かないこと。共用機では別の機体を
-指していることがある。
-
-### 1 台の PC に機体を 2 台以上繋ぐとき
-
-`LEKIWI_DEVICE` と `RPLIDAR_DEVICE` の代わりに、末尾に `_<名前>` を付けて
-機体ごとに書く。名前は英数字（`_` と `-` も可）。
-
-```bash
-LEKIWI_DEVICE_1=/dev/serial/by-id/usb-1a86_USB_Single_Serial_5A7A017874-if00
-RPLIDAR_DEVICE_1=/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_rplidar-1-if00-port0
-LEKIWI_DEVICE_2=/dev/serial/by-id/usb-1a86_USB_Single_Serial_5A68011993-if00
-RPLIDAR_DEVICE_2=/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_rplidar-2-if00-port0
-```
-
-どちらを動かすかは 4 章の `make up-base ROBOT=1` で選ぶ。
-`ROS_DOMAIN_ID_1` や `MAP_DIR_1` も書ける（無ければ共通の値を使う）。
+それ以外の PC では `cp .env.example .env` して、`make serial-ids` で調べた
+`/dev/serial/by-id/` のパスを書く（`.env.example` のコメント参照）。
+その PC で初めてなら `make install-udev` も 1 回叩く。
 
 ---
 
-## 2. udev
-
-```bash
-make udev-dry-run     # 入れるルールを見るだけ
-make install-udev     # 全機体共通のルール。PC ごとに 1 回
-```
-
-このルールは機体を区別しない。機体の区別は 1 章の `.env` の by-id パスで行う。
-
----
-
-## 3. ビルド
+## 2. ビルド
 
 ```bash
 make build
@@ -93,22 +45,19 @@ make bootstrap        # 初回とパッケージ追加時
 
 ---
 
-## 4. コンテナに入る
+## 3. コンテナに入る
 
 ```bash
-make up-base          # コンテナを起動する（ロボットはまだ動かない）
+make up-base ROBOT=1  # 機体 1 のコンテナ robot-1 を起動する（ロボットはまだ動かない）
 make shell            # コンテナに入る
 ```
 
+`ROBOT` を付けるのは `up-base` だけでよい。選んだ機体は
+`docker/robot/.robot` に残り、以降の `make`（`shell`、`check-base`、
+`release`、`down`）は同じ機体を使う。
+
 以降のコマンドは**コンテナの中**で叩く。別端末が要るときは、もう一度
 `make shell` すればよい。
-
-機体を 2 台以上書いたときは、`up-base` で機体を選ぶ。
-
-```bash
-make up-base ROBOT=1  # コンテナ名は robot-1
-make shell            # ROBOT は付けなくてよい（docker/robot/.robot に残っている）
-```
 
 ★ **動かせるのは一度に 1 台だけ。** 別の機体のコンテナが動いていると
 `make up-base` はエラーで止まる。切り替えるときは、動いている方の launch を
@@ -122,7 +71,7 @@ make up-base ROBOT=2
 
 ---
 
-## 5. 起動（SLAM）
+## 4. 起動（SLAM）
 
 ```bash
 ros2 launch lekiwi_base_bringup nav.launch.py
@@ -143,7 +92,7 @@ make check-base
 
 ---
 
-## 6. 走らせる
+## 5. 走らせる
 
 ```bash
 ros2 topic pub --once /cmd_vel geometry_msgs/msg/Twist '{linear: {x: 0.05}}'
@@ -159,7 +108,7 @@ ros2 topic pub --once /goal_pose geometry_msgs/msg/PoseStamped \
 
 ---
 
-## 7. 地図を保存する
+## 6. 地図を保存する
 
 `nav.launch.py` を**走らせたまま別のシェルで**。
 
@@ -180,7 +129,7 @@ ros2 run lekiwi_base_bringup save_map /tmp/test  # / で始めれば絶対パス
 
 ---
 
-## 8. 保存地図で走る（AMCL）
+## 7. 保存地図で走る（AMCL）
 
 ```bash
 ros2 launch lekiwi_base_bringup nav_with_map.launch.py map_file:=/maps/my_room.yaml
@@ -206,7 +155,7 @@ ros2 service call /request_nomotion_update std_srvs/srv/Empty {}
 
 ---
 
-## 9. 停止
+## 8. 停止
 
 ```bash
 # launch を叩いたシェルで Ctrl+C（ホイールの速度ゼロ + トルク OFF）
@@ -219,7 +168,7 @@ make down       # コンテナを片付ける
 
 ---
 
-## 10. 異常終了したとき
+## 9. 異常終了したとき
 
 launch が落ちた / SIGKILL された / ホイールが走り出した場合。**ホスト側で**:
 
@@ -233,7 +182,7 @@ make release BUS_MODE=base          # ホイールを止めてトルクを切る
 
 ---
 
-## 11. 動作確認でやってほしいこと
+## 10. 動作確認でやってほしいこと
 
 以下の topic や機能の確認をしてみてください。
 
@@ -294,11 +243,10 @@ make release BUS_MODE=base          # ホイールを止めてトルクを切る
 
 | コマンド | 内容 |
 | --- | --- |
-| `make install-udev` | 全機体共通の udev ルール（PC ごとに 1 回） |
+| `make install-udev` | 全機体共通の udev ルール（PC ごとに 1 回。共用機では設定済み） |
 | `make serial-ids` | `.env` に書く by-id パスの候補 |
 | `make build` / `make bootstrap` | イメージとワークスペース |
-| `make up-base` | コンテナを起動 |
-| `make up-base ROBOT=<名前>` | 機体を選んでコンテナを起動（機体が複数あるとき） |
+| `make up-base ROBOT=<名前>` | 機体を選んでコンテナを起動 |
 | `make shell` | コンテナに入る |
 | `make check-base` | ROS グラフの確認 |
 | `make release BUS_MODE=base` | 異常終了からの復帰 |
