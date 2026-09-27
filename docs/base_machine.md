@@ -56,6 +56,21 @@ USB を抜いて `make serial-ids` を打ち、消えた行が自分の機器。
 ★ `/dev/lekiwi` や `/dev/rplidar` を書かないこと。共用機では別の機体を
 指していることがある。
 
+### 1 台の PC に機体を 2 台以上繋ぐとき
+
+`LEKIWI_DEVICE` と `RPLIDAR_DEVICE` の代わりに、末尾に `_<名前>` を付けて
+機体ごとに書く。名前は英数字（`_` と `-` も可）。
+
+```bash
+LEKIWI_DEVICE_1=/dev/serial/by-id/usb-1a86_USB_Single_Serial_5A7A017874-if00
+RPLIDAR_DEVICE_1=/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_rplidar-1-if00-port0
+LEKIWI_DEVICE_2=/dev/serial/by-id/usb-1a86_USB_Single_Serial_5A68011993-if00
+RPLIDAR_DEVICE_2=/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_rplidar-2-if00-port0
+```
+
+どちらを動かすかは 4 章の `make up-base ROBOT=1` で選ぶ。
+`ROS_DOMAIN_ID_1` や `MAP_DIR_1` も書ける（無ければ共通の値を使う）。
+
 ---
 
 ## 2. udev
@@ -87,6 +102,23 @@ make shell            # コンテナに入る
 
 以降のコマンドは**コンテナの中**で叩く。別端末が要るときは、もう一度
 `make shell` すればよい。
+
+機体を 2 台以上書いたときは、`up-base` で機体を選ぶ。
+
+```bash
+make up-base ROBOT=1  # コンテナ名は robot-1
+make shell            # ROBOT は付けなくてよい（docker/robot/.robot に残っている）
+```
+
+★ **動かせるのは一度に 1 台だけ。** 別の機体のコンテナが動いていると
+`make up-base` はエラーで止まる。切り替えるときは、動いている方の launch を
+`Ctrl+C` で止めてから、ホストで次を叩く。
+
+```bash
+make release BUS_MODE=base   # 動いていた機体のホイールを解放
+make down
+make up-base ROBOT=2
+```
 
 ---
 
@@ -266,6 +298,7 @@ make release BUS_MODE=base          # ホイールを止めてトルクを切る
 | `make serial-ids` | `.env` に書く by-id パスの候補 |
 | `make build` / `make bootstrap` | イメージとワークスペース |
 | `make up-base` | コンテナを起動 |
+| `make up-base ROBOT=<名前>` | 機体を選んでコンテナを起動（機体が複数あるとき） |
 | `make shell` | コンテナに入る |
 | `make check-base` | ROS グラフの確認 |
 | `make release BUS_MODE=base` | 異常終了からの復帰 |

@@ -13,6 +13,8 @@ wheels/
 .DS_Store
 
 *.env
+# make up-* ROBOT=<名前> で選んだ機体 (docker/robot/Makefile)
+docker/robot/.robot
 # images
 captured_images/
 outputs/

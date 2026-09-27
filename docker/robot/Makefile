@@ -42,6 +42,35 @@
 
 -include .env
 
+# ■ 機体の選択 (1 つの PC に機体を複数繋いで交互に動かすとき)
+#   .env に機体ごとの LEKIWI_DEVICE_<名前> / RPLIDAR_DEVICE_<名前> /
+#   SO101_DEVICE_<名前> を書き、`make up-base ROBOT=<名前>` で選ぶ。
+#   選んだ名前は .robot に残るので、以降の shell / run-* / release / down は
+#   ROBOT を付けなくても同じ機体を使う。
+#   ROS_DOMAIN_ID_<名前> と MAP_DIR_<名前> は任意 (無ければ共通の値)。
+#   コンテナ名と compose のプロジェクト名は robot-<名前> になり、機体ごとに分かれる。
+#   ★ 別の機体のコンテナが動いている間は guard-other-robots が起動を止める。
+#   ROBOT を付けず .robot も無ければ、従来どおり *_DEVICE をそのまま使う。
+ROBOT_FILE := .robot
+ROBOT ?= $(shell cat $(ROBOT_FILE) 2>/dev/null)
+ifneq ($(ROBOT),)
+  ifneq ($(shell printf '%s' '$(ROBOT)' | grep -Eqx '[A-Za-z0-9_-]+' && echo ok),ok)
+    $(error ROBOT=$(ROBOT) は英数字・_・- だけにすること)
+  endif
+  LEKIWI_DEVICE        := $(LEKIWI_DEVICE_$(ROBOT))
+  SO101_DEVICE         := $(SO101_DEVICE_$(ROBOT))
+  RPLIDAR_DEVICE       := $(RPLIDAR_DEVICE_$(ROBOT))
+  ROBOT_CONTAINER      := robot-$(ROBOT)
+  COMPOSE_PROJECT_NAME := robot-$(ROBOT)
+  ifneq ($(ROS_DOMAIN_ID_$(ROBOT)),)
+    ROS_DOMAIN_ID := $(ROS_DOMAIN_ID_$(ROBOT))
+  endif
+  ifneq ($(MAP_DIR_$(ROBOT)),)
+    MAP_DIR := $(MAP_DIR_$(ROBOT))
+  endif
+  DEVICE_SUFFIX := _$(ROBOT)
+endif
+
 MAP_NAME   ?= my_room
 # run-base-map が読む地図。make save-map で作ったものを指す。
 MAP_FILE   ?= /maps/$(MAP_NAME).yaml
@@ -65,7 +94,8 @@ MOCK_START_RVIZ ?= false
 #   .env の設定が黙って無視されていた)。make 変数として `?=` で既定値を与え、
 #   `$(...)` で参照すること。
 #   compose.yaml 側の `${LEKIWI_DEVICE:?...}` は docker compose が .env を
-#   自分で読むので別経路。
+#   自分で読むが、下で export した値 (シェルの環境変数) の方が .env より優先される。
+#   ROBOT で選んだ機体のデバイスはこの経路で compose に届く。
 #
 # ★ *_DEVICE はホスト側のパス。機体ごとの /dev/serial/by-id/… を .env に書く。
 #   既定値は置かない。共用機では /dev/lekiwi のような名前が他の機体を指して
@@ -74,6 +104,13 @@ LEKIWI_DEVICE  ?=
 SO101_DEVICE   ?=
 RPLIDAR_DEVICE ?=
 MAP_DIR        ?= $(HOME)/maps
+export LEKIWI_DEVICE SO101_DEVICE RPLIDAR_DEVICE MAP_DIR
+ifneq ($(ROBOT),)
+  export ROBOT_CONTAINER COMPOSE_PROJECT_NAME
+  ifneq ($(ROS_DOMAIN_ID_$(ROBOT)),)
+    export ROS_DOMAIN_ID
+  endif
+endif
 
 # コンテナ内のデバイス名。compose の bind 宛先と launch の既定値に揃えてある。
 # ホスト側 (機体ごとの by-id パス) は上の *_DEVICE。
@@ -164,20 +201,30 @@ guard: guard-other-robots
 guard-mock:
 	$(call guard_against,$(CONFLICTS_FOR_MOCK))
 
+# up-* の最後に、選んだ機体を .robot に残す。
+define record_robot
+	@if [ -n "$(ROBOT)" ]; then \
+	  echo "$(ROBOT)" > $(ROBOT_FILE); \
+	  echo "機体 $(ROBOT) を選択 (コンテナ $(CTR))。以降の make は ROBOT を付けなくてよい"; \
+	fi
+endef
+
 # $(1) = 変数名, $(2) = 値
 define require_device
 	@test -n "$(2)" || { \
-	  echo "ERROR: .env の $(1) が空。make serial-ids で調べた /dev/serial/by-id/ のパスを書くこと" >&2; exit 1; }
+	  echo "ERROR: .env の $(1) が空。make serial-ids で調べた /dev/serial/by-id/ のパスを書くこと" >&2; \
+	  test -n "$(ROBOT)" || echo "       機体ごとに書いているなら ROBOT=<名前> を付けること (例: make up-base ROBOT=1)" >&2; \
+	  exit 1; }
 	@test -c "$(2)" || { \
 	  echo "ERROR: $(1)=$(2) が文字デバイスではない。USB接続と make serial-ids を確認すること" >&2; exit 1; }
 endef
 
 preflight-shared-devices:
-	$(call require_device,LEKIWI_DEVICE,$(LEKIWI_DEVICE))
-	$(call require_device,RPLIDAR_DEVICE,$(RPLIDAR_DEVICE))
+	$(call require_device,LEKIWI_DEVICE$(DEVICE_SUFFIX),$(LEKIWI_DEVICE))
+	$(call require_device,RPLIDAR_DEVICE$(DEVICE_SUFFIX),$(RPLIDAR_DEVICE))
 
 preflight-split-devices: preflight-shared-devices
-	$(call require_device,SO101_DEVICE,$(SO101_DEVICE))
+	$(call require_device,SO101_DEVICE$(DEVICE_SUFFIX),$(SO101_DEVICE))
 
 # アームを取り外した機体が要るのはベースとLiDARの2つだけ。shared機と同じ。
 preflight-base-devices: preflight-shared-devices
@@ -186,11 +233,13 @@ up-split: guard preflight-split-devices
 	@test -f .env || { echo "ERROR: .env が無い。cp .env.example .env して編集すること" >&2; exit 1; }
 	mkdir -p $(MAP_DIR)
 	docker compose -f compose.yaml -f compose.split.yaml up -d
+	$(record_robot)
 
 up-shared: guard preflight-shared-devices
 	@test -f .env || { echo "ERROR: .env が無い。cp .env.example .env して編集すること" >&2; exit 1; }
 	mkdir -p $(MAP_DIR)
 	docker compose -f compose.yaml -f compose.shared.yaml up -d
+	$(record_robot)
 
 # ★ アームを取り外した機体。compose.base.yaml は /dev/so101_follower を
 #   mount しない (存在しないので mount するとコンテナが上がらない)。
@@ -198,6 +247,7 @@ up-base: guard preflight-base-devices
 	@test -f .env || { echo "ERROR: .env が無い。cp .env.example .env して編集すること" >&2; exit 1; }
 	mkdir -p $(MAP_DIR)
 	docker compose -f compose.yaml -f compose.base.yaml up -d
+	$(record_robot)
 
 # ★ 前面で走らせること。Ctrl+C が launch に届いてはじめて停止処理
 #   (アームのトルク OFF + ホイールの速度ゼロ) が走る。

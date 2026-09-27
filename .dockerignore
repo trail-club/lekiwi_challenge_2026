@@ -24,6 +24,7 @@ docker/lekiwi_base_ros2/README.md
 docker/so101_ros2/.env
 docker/so101_ros2/README.md
 docker/robot/.env
+docker/robot/.robot
 docker/robot/README.md
 docker/robot/99-robot-serial.rules
 
