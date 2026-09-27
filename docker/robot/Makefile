@@ -45,8 +45,14 @@
 MAP_NAME   ?= my_room
 # run-base-map が読む地図。make save-map で作ったものを指す。
 MAP_FILE   ?= /maps/$(MAP_NAME).yaml
+# compose のサービス名 (compose exec / run に渡す)。
 SVC        := robot
 SVC_MOCK   := robot-mock
+# コンテナ名 (docker ps / docker exec で探す)。機体ごとに .env の ROBOT_CONTAINER で変える。
+ROBOT_CONTAINER ?= robot
+CTR        := $(ROBOT_CONTAINER)
+CTR_MOCK   := $(ROBOT_CONTAINER)-mock
+IMAGE      := local/lekiwi-so101:jazzy
 E          := /entrypoint.sh
 BACKEND    ?= lerobot
 SO101_ROBOT_ID ?= my_follower
@@ -86,10 +92,10 @@ LEGACY := so101-follower lekiwi-base lekiwi-base-dryrun rplidar-a1 realsense-d43
 #     ので検出は続ける。しばらく経って実機から消えたら外してよい。
 LEGACY += lekiwi-nav lekiwi-nav-mock lekiwi-so101-arm lekiwi-so101-arm-mock \
           lekiwi-wrist-camera
-CONFLICTS_FOR_REAL := $(LEGACY) $(SVC_MOCK)
-CONFLICTS_FOR_MOCK := $(LEGACY) $(SVC)
+CONFLICTS_FOR_REAL := $(LEGACY) $(CTR_MOCK)
+CONFLICTS_FOR_MOCK := $(LEGACY) $(CTR)
 
-.PHONY: build bootstrap install-udev udev-dry-run serial-ids up-split up-shared up-base \
+.PHONY: build bootstrap install-udev udev-dry-run serial-ids guard-other-robots up-split up-shared up-base \
         run-split run-shared run-base run-base-map \
         mock-split mock-shared mock-base shell stow save-map check check-base release \
         release-wheels release-check down logs guard guard-mock require-bus-mode \
@@ -138,7 +144,21 @@ define guard_against
 	done
 endef
 
-guard:
+# ★ 同じ PC の別の機体 (ROBOT_CONTAINER が違う) のコンテナが動いていたら止める。
+#   機体は交互に動かす前提。動いている方は launch を Ctrl+C で止め、
+#   その機体のチェックアウトで make release → make down してから切り替える。
+#   docker stop / docker kill で止めないこと (ホイールが回り続ける)。
+guard-other-robots:
+	@others=$$(docker ps --filter ancestor=$(IMAGE) --format '{{.Names}}' \
+	           | grep -vx -e '$(CTR)' -e '$(CTR_MOCK)'); \
+	if [ -n "$$others" ]; then \
+	  echo "ERROR: 別の機体のコンテナが動いている: $$others" >&2; \
+	  echo "       その機体の launch を Ctrl+C で止め、その機体のチェックアウトで" >&2; \
+	  echo "       make release BUS_MODE=... と make down を済ませてから起動すること。" >&2; \
+	  exit 1; \
+	fi
+
+guard: guard-other-robots
 	$(call guard_against,$(CONFLICTS_FOR_REAL))
 
 guard-mock:
@@ -281,7 +301,7 @@ endef
 # ★ 起動直後は DDS の discovery が終わっておらず、publisher 数が実際より
 #   少なく出る。数が合うまで最大 60 秒待ってから表示する。
 check:
-	@C=$$(docker ps -q -f name=^$(SVC)$$ -f name=^$(SVC_MOCK)$$ | head -1); \
+	@C=$$(docker ps -q -f name=^$(CTR)$$ -f name=^$(CTR_MOCK)$$ | head -1); \
 	test -n "$$C" || { echo "コンテナが動いていない" >&2; exit 1; }; \
 	echo "discovery を待っています..."; \
 	for i in $$(seq 1 30); do \
@@ -317,7 +337,7 @@ check:
 #   ★ bash -c の引数を行継続で折り返さないこと。シングルクォートの中では
 #     バックスラッシュ+改行がそのまま残り、コマンドが壊れる。
 check-base:
-	@C=$$(docker ps -q -f name=^$(SVC)$$ -f name=^$(SVC_MOCK)$$ | head -1); \
+	@C=$$(docker ps -q -f name=^$(CTR)$$ -f name=^$(CTR_MOCK)$$ | head -1); \
 	test -n "$$C" || { echo "コンテナが動いていない" >&2; exit 1; }; \
 	echo "discovery を待っています..."; \
 	for i in $$(seq 1 30); do \
@@ -370,14 +390,14 @@ ifeq ($(BUS_MODE),base)
 endif
 
 define release_all_cmd
-	@if [ -n "$$(docker ps -q -f name=^$(SVC)$$)" ]; then \
-	  echo "コンテナ $(SVC) は動いています。その中で実行します。"; \
+	@if [ -n "$$(docker ps -q -f name=^$(CTR)$$)" ]; then \
+	  echo "コンテナ $(CTR) は動いています。その中で実行します。"; \
 	  docker compose -f compose.yaml exec $(1) $(SVC) $(E) \
 	    ros2 run lekiwi_so101_bringup release_all --bus-mode $(RELEASE_BUS_MODE) \
 	      --shared-port $(CT_LEKIWI) --wheel-port $(CT_LEKIWI) \
 	      --arm-port $(CT_SO101) $(RELEASE_ONLY) $(2); \
 	else \
-	  echo "コンテナ $(SVC) は動いていません。使い捨てコンテナで実行します。"; \
+	  echo "コンテナ $(CTR) は動いていません。使い捨てコンテナで実行します。"; \
 	  docker compose -f compose.yaml -f $(RELEASE_COMPOSE) run --rm $(1) $(SVC) $(E) \
 	    ros2 run lekiwi_so101_bringup release_all --bus-mode $(RELEASE_BUS_MODE) \
 	      --shared-port $(CT_LEKIWI) --wheel-port $(CT_LEKIWI) \

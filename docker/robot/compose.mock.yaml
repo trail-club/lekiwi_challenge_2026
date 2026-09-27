@@ -29,7 +29,7 @@ services:
       context: ../..
       dockerfile: docker/robot/Dockerfile
     image: local/lekiwi-so101:jazzy
-    container_name: robot-mock
+    container_name: ${ROBOT_CONTAINER:-robot}-mock
     init: true
     network_mode: host
     ipc: host

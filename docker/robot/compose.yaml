@@ -47,7 +47,9 @@ services:
       context: ../..
       dockerfile: docker/robot/Dockerfile
     image: local/lekiwi-so101:jazzy
-    container_name: robot
+    # ★ 1 台の PC で機体を交互に動かすとき、機体ごとに .env の ROBOT_CONTAINER を
+    #   変える。同名だと、別の機体の停止済みコンテナが残っているだけで起動できない。
+    container_name: ${ROBOT_CONTAINER:-robot}
     init: true
     network_mode: host
     ipc: host
