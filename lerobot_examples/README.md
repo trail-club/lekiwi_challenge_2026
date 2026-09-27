@@ -119,7 +119,7 @@ cp -a ~/.cache/huggingface/lerobot/calibration/robots/so_follower \
       ~/so_follower_backup_$(date +%Y%m%d_%H%M)
 
 uv run lerobot-calibrate --robot.type=so101_follower \
-  --robot.port=/dev/so101_follower --robot.id=my_follower
+  --robot.port=/dev/serial/by-id/usb-1a86_… --robot.id=my_follower  # docker/robot/.env の SO101_DEVICE
 ```
 
 ★ **較正は ROS を止めた状態で行ってください。** ROS 側からは変更できませんし、

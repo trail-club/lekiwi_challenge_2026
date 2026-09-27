@@ -37,7 +37,7 @@
   <!-- ★ arm_mount_link の位置は実測済み: base_link から (0.08, 0.00, 0.057)。
        以下は arm_mount_link から見たアーム基部の姿勢。
        取付姿勢 (roll/pitch/yaw) は実測値を使用する。
-       docs/agent/request.md の手順 3 でTFを照合すること。
+       値を変えたら実機で TF を照合すること。
        xacro のマクロ引数はベクトルを展開できないのでスカラ 6 個で渡す。 -->
   <xacro:arg name="arm_mount_x" default="0.0"/>
   <xacro:arg name="arm_mount_y" default="0.0"/>

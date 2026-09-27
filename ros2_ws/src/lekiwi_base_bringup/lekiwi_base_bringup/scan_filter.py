@@ -4,9 +4,12 @@
 有効とし、それ以外の角度の測距値を inf(障害物なし)に置き換えて /scan_filtered
 に転送する。
 
-Nav2 のコストマップ・collision_monitor がこのトピックを購読することで、
-後方の車輪・ボディが誤って障害物としてマーキングされるのを防ぐ。
-SLAM (slam_toolbox) は /scan (全角度) をそのまま使うため地図品質は落ちない。
+Nav2 のコストマップ・collision_monitor・AMCL・slam_toolbox がこのトピックを
+購読することで、後方の車輪・ボディが誤って障害物としてマーキングされるのを防ぐ。
+
+★ SLAM もこちらを使う (slam_toolbox.yaml の scan_topic)。地図に自機が
+  焼き付くのを避けるため。地図とそれを突き合わせる AMCL (nav2.yaml の
+  amcl.scan_topic) も同じトピックにしてある。
 
 パラメータ:
     angle_min_deg (float, 既定 -60.0): 有効範囲の下限 [deg]

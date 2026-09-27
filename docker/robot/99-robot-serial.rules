@@ -1,0 +1,25 @@
+# LeKiwi / SO-101 / RPLIDAR のシリアル用 udev ルール (全機体共通)。
+#
+# ★ 機体固有の値 (シリアル番号) を書かないこと。シンボリックリンクも作らない。
+#   1 台の PC に複数の機体を繋ぐと、機体ごとのルールは後から入れた方が
+#   前の機体の /dev/lekiwi や /dev/rplidar を上書きする。
+#   機体の区別はカーネルが作る /dev/serial/by-id/ で行い、どれを使うかは
+#   各自の docker/robot/.env の *_DEVICE に書く。
+#   このファイルは全機体で同じなので、何度入れても誰のものも壊さない。
+#
+# 1a86:55d3 : WaveShare のサーボバス基板 (LeKiwi ベースと SO-101 アームで同一)
+# 10c4:ea60 : RPLIDAR A1 の CP2102
+#
+# ID_MM_DEVICE_IGNORE について:
+#   ModemManager は新しく現れたシリアルポートへ数秒間 AT コマンドを送って
+#   探りを入れる。これがサーボバスを壊し、症状は「接続直後だけ散発的に
+#   Incorrect status packet! が出る」という分かりにくい形で現れる
+#   (sts_bus.py のリトライが症状を隠してしまう)。
+
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="55d3", \
+  MODE:="0660", GROUP:="dialout", \
+  ENV{ID_MM_DEVICE_IGNORE}="1", ENV{ID_MM_PORT_IGNORE}="1"
+
+SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", \
+  MODE:="0660", GROUP:="dialout", \
+  ENV{ID_MM_DEVICE_IGNORE}="1", ENV{ID_MM_PORT_IGNORE}="1"

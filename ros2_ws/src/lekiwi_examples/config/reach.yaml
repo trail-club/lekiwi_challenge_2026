@@ -61,7 +61,7 @@ so101_reach_to_point:
     base_motion_tolerance: 0.02
     base_watch_rate: 10.0
 
-    # ★ 実機で手動確認してから埋めること（docs/agent/request.md 手順5）。
+    # ★ 実機で手動確認してから埋めること。
     #   laser_link と arm_mount_link は xy で 44mm しか離れていない。
     #   形式は "関節名:下限:上限"。URDF の可動範囲との積集合を取る。
     #   例: ["arm_shoulder_pan_joint:-1.2:1.2"]

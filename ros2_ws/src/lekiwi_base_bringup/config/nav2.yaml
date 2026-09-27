@@ -86,7 +86,10 @@ amcl:
     z_max: 0.05
     z_rand: 0.5
     z_short: 0.05
-    scan_topic: scan
+    # ★ 地図は /scan_filtered から作られている (slam_toolbox.yaml と同じ)。
+    #   生の /scan には自機の車輪・ボディの反射が含まれ、地図側にはそれが無い。
+    #   突き合わせる相手を揃える。
+    scan_topic: scan_filtered
 
 bt_navigator:
   ros__parameters:

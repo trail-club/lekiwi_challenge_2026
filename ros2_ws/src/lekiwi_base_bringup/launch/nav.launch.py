@@ -89,8 +89,17 @@ def generate_launch_description():
         DeclareLaunchArgument("port", default_value="/dev/lekiwi",
                               description="LeKiwiベースのシリアルポート"),
         DeclareLaunchArgument("hardware_backend", default_value="serial"),
-        DeclareLaunchArgument("serial_port", default_value="/dev/ttyUSB0",
-                              description="RPLIDAR A1 のシリアルポート (start_lidar:=true 時のみ使用)"),
+        # ★ 既定は udev が作る安定名。port (/dev/lekiwi) と揃えてある。
+        #   /dev/ttyUSB0 は挿し直すと番号が変わるうえ、docker/robot が
+        #   コンテナへ bind mount するのは RPLIDAR_DEVICE (既定 /dev/rplidar)
+        #   だけなので、既定が ttyUSB0 だと sllidar_node だけが黙って死ぬ
+        #   (/scan が出ず、slam_toolbox が map->odom を出さない)。
+        #   udev ルールを入れていない環境では明示すること:
+        #     ros2 launch ... serial_port:=/dev/ttyUSB0
+        DeclareLaunchArgument("serial_port", default_value="/dev/rplidar",
+                              description="RPLIDAR A1 のシリアルポート "
+                                          "(start_lidar:=true 時のみ使用)。"
+                                          "udev で作る安定名"),
         DeclareLaunchArgument("start_rviz", default_value="true"),
         # /robot_description は TRANSIENT_LOCAL / depth 1 なので、publisher が
         # 2 つあると後から繋いだ購読者がどちらの latch を掴むか非決定になる

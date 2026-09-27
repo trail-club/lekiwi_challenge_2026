@@ -17,7 +17,7 @@ sharedの車輪IDは `7=left, 8=back, 9=right` 固定です。split機の7.4Vア
 
 1. [リポジトリを取得する](#1-リポジトリを取得する)
 2. [Docker イメージをビルドする](#2-docker-イメージをビルドする)（初回のみ・時間がかかります）
-3. [udev ルールを入れる](#3-udev-ルールを入れる-linux-のみ初回のみ)（★ Linux のみ・初回のみ）
+3. [シリアルデバイスを設定する](#3-シリアルデバイスを設定する-linux-のみ初回のみ)（★ Linux のみ・初回のみ）
 4. [アームを較正する](#4-アームを較正する-linux-のみ初回のみ)（★ Linux のみ・初回のみ）
 5. [ワークスペースを初期化する](#5-ワークスペースを初期化する)（初回とパッケージ追加時）
 6. [起動方法](#6-起動方法)（★ 安全上の注意）
@@ -53,79 +53,98 @@ make build
 
 ---
 
-## 3. udev ルールを入れる（★ Linux のみ・初回のみ）
+## 3. シリアルデバイスを設定する（★ Linux のみ・初回のみ）
 
-シリアル 3 本に固定名（`/dev/lekiwi` `/dev/so101_follower` `/dev/rplidar`）を
-付けます。ルールは `SYMLINK+=` で `/dev/<名前>` を作り、`GROUP:="dialout"` を
-付けます。**入れないとコンテナがデバイスを掴めません。**
+機体のシリアル 3 本（ベース・アーム・RPLIDAR）を、ホストの
+`/dev/serial/by-id/` のパスで `.env` に書きます。by-id のパスには
+USB 機器のシリアル番号が入っているので、1 台の PC に複数の機体を繋いでも
+取り違えません。コンテナの中ではいつも `/dev/lekiwi` `/dev/so101_follower`
+`/dev/rplidar` に見えます。
 
-> ★ **アームとベースはシリアル番号で識別します。** 両方 WaveShare の同じ設計で
-> **VID:PID が同一（`1a86:55d3`）**のため、VID:PID で書くと `/dev/lekiwi` と
-> `/dev/so101_follower` が**どちらも「最後に認識された方」の同じ基板を指し**、
-> 12V のホイール指令が 7.4V のアームサーボへ飛びます。
+> ★ **アームとベースはシリアル番号で区別します。** 両方 WaveShare の同じ設計で
+> **VID:PID が同一（`1a86:55d3`）**です。取り違えると 12V のホイール指令が
+> 7.4V のアームサーボへ飛びます。
 
-**① 自分の基板のシリアル番号を調べる**
+**① udev ルールを入れる（PC ごとに 1 回）**
 
-★ **1 本ずつ挿してください。** 2 本同時に挿すと VID:PID が同じなので、
-どちらのシリアルがどちらの基板か区別できません。
+ModemManager がサーボバスへ AT コマンドを送らないようにし、`dialout`
+グループに読み書きさせるルールです。全機体で共通なので、機体を増やしても
+入れ直す必要はありません。
 
 ```bash
-for d in /dev/ttyACM*; do
-  echo "$d  $(udevadm info -q property -n "$d" | grep -m1 ID_SERIAL_SHORT)"
-done
+# リポジトリ直下で
+make udev-dry-run   # 入れるルールを見るだけ
+make install-udev
 ```
 
-**② `.env` に①の値を書く**
+**② RPLIDAR のシリアル番号を書き換える（LiDAR ごとに 1 回）**
 
-追跡対象の `.rules` はテンプレートです。機体固有値で直接編集しません。
+RPLIDAR A1 の USB 変換（CP2102）は、どの個体もシリアル番号が `0001` です。
+このままでは by-id で区別できないので、個体ごとに違う値を書き込みます。
+**CP2102 の EEPROM への永続的な書き込み**です。書いた値は LiDAR 本体に
+テープで貼るなどして控えてください。
+
+`sudo` が使える PC で行います（共用機では使えないことがあります）。
+
+```bash
+sudo apt install libusb-1.0-0-dev
+git clone https://github.com/DiUS/cp210x-cfg.git ~/cp210x-cfg
+make -C ~/cp210x-cfg
+```
+
+★ **`-d` を必ず付けます。** 付けないと、最初に見つかった CP210x に書き込みます。
+書き込む LiDAR の `bus` と `dev` は `-l` の一覧で確かめます。
+LiDAR を 1 台だけ挿しておくと取り違えません。複数挿さっている場合は、
+対象を挿し直して `lsusb -d 10c4:ea60` の `Device` 番号が変わった方を選びます。
+
+```bash
+sudo ~/cp210x-cfg/cp210x-cfg -l                # 一覧。"@ bus 001, dev 021" の形
+sudo ~/cp210x-cfg/cp210x-cfg -d 1.21           # 現在の値を表示するだけ。書式は bus.dev
+sudo ~/cp210x-cfg/cp210x-cfg -d 1.21 -S rplidar-1
+```
+
+値は英数字とハイフンで、他の LiDAR と重ならないものにします。
+
+書き込むと CP2102 が自分でリセットして繋がり直すので、`-S` の出力に
+`failed to read cfg item … No such device` が出ます。**これは正常です。**
+挿し直しは要りません。`dev` の番号が変わるので、`-l` で番号を調べ直し、
+`-d` で読み直して `Serial:` を確かめます。`ls -l /dev/serial/by-id/` の
+名前の末尾も変わります。
+
+**③ by-id のパスを調べる**
+
+```bash
+make serial-ids
+```
+
+| 名前 | 機器 |
+| --- | --- |
+| `usb-1a86_…` | WaveShare のサーボバス基板（ベース・アーム） |
+| `usb-Silicon_Labs_CP2102_…` | RPLIDAR |
+
+★ **split 機ではベースとアームの基板を 1 本ずつ挿して確かめてください。**
+名前の形が同じなので、2 本同時に挿すとどちらがどちらか分かりません。
+
+**④ `.env` に書く**
 
 ```bash
 cp docker/robot/.env.example docker/robot/.env  # 初回だけ
+getent group dialout        # 出力の 3 番目の数字が DIALOUT_GID（Ubuntu なら 20）
 ```
 
 ```dotenv
 # docker/robot/.env
-LEKIWI_SERIAL=<sharedバスまたはベース基板のID_SERIAL_SHORT>
-SO101_SERIAL=<split機のアーム基板のID_SERIAL_SHORT>
+LEKIWI_DEVICE=/dev/serial/by-id/usb-1a86_…    # shared 機は全モータ、split 機はベース
+SO101_DEVICE=/dev/serial/by-id/usb-1a86_…     # split 機のアーム。それ以外は空
+RPLIDAR_DEVICE=/dev/serial/by-id/usb-Silicon_Labs_CP2102_…
+DIALOUT_GID=20
 ```
 
-shared機では `LEKIWI_SERIAL` だけが必須です。split機では両方必要です。
-RPLIDARは `10c4:ea60` で識別するためシリアル設定はありません。
+★ **`/dev/lekiwi` や `/dev/rplidar` を書かないでください。** 共用機では
+他の機体を指していることがあります。
 
-**基板を交換したらシリアルが変わります。**その都度①からやり直してください。
-
-**③ 入れて反映する**
-
-```bash
-# リポジトリ直下で
-make udev-dry-run BUS_MODE=shared  # 生成内容を見るだけ
-make install-udev BUS_MODE=shared  # shared機
-
-# split機の場合
-make install-udev BUS_MODE=split
-```
-
-過去のCompose起動で `/dev/lekiwi` 等が空ディレクトリになっている場合、
-インストーラは安全のため停止します。表示された対象だけ `sudo rmdir` して再実行します。
-
-**④ 必要なデバイスが見えることを確認する**
-
-```bash
-ls -l /dev/lekiwi /dev/rplidar
-ls -l /dev/so101_follower  # split機だけ必要
-```
-
-### `.env` を用意する
-
-```bash
-cp docker/robot/.env.example docker/robot/.env
-getent group dialout        # 出力の 3 番目の数字が DIALOUT_GID（Ubuntu なら 20）
-```
-
-USBシリアルを含む `.env` はGit管理外です。別機体ではその機体の `.env` を作ります。
-
-`DIALOUT_GID` が 20 で、④ のデバイスが見えているなら**編集不要**です。
-違うときだけ `.env` を書き換えてください。
+`.env` は Git 管理外です。別の機体ではその機体の `.env` を作ります。
+**基板や LiDAR を交換したら by-id のパスが変わります。**③からやり直してください。
 
 ---
 
@@ -142,16 +161,16 @@ cd lerobot_examples
 uv sync                              # ★ 初回のみ。lerobot を入れる
 uv run lerobot-find-port             # 使用するモータードライバが出るか確認
 
-# split機（7.4Vアーム、6モーター）
+# split機（7.4Vアーム、6モーター）。port は .env の SO101_DEVICE と同じパス
 uv run lerobot-calibrate \
   --robot.type=so101_follower \
-  --robot.port=/dev/so101_follower \
+  --robot.port=/dev/serial/by-id/usb-1a86_… \
   --robot.id=my_follower
 
-# shared機（全モータ12V、ID 1〜9）
+# shared機（全モータ12V、ID 1〜9）。port は .env の LEKIWI_DEVICE と同じパス
 uv run lerobot-calibrate \
   --robot.type=lekiwi \
-  --robot.port=/dev/lekiwi \
+  --robot.port=/dev/serial/by-id/usb-1a86_… \
   --robot.id=my_lekiwi
 ```
 

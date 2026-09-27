@@ -58,20 +58,17 @@ VID/PID を確認します。
 udevadm info --attribute-walk --name=/dev/ttyACM0 | grep -m1 -E 'idVendor|idProduct'
 ```
 
-USBシリアルは `docker/robot/.env` の `LEKIWI_SERIAL` に設定します。
-追跡対象のルールはテンプレートなので直接編集・コピーしません。
+全機体共通の udev ルールを入れ、基板の by-id パスを調べます。
 
 ```bash
 cd ../..
-make udev-dry-run BUS_MODE=shared
-make install-udev BUS_MODE=shared
-# 反映されない場合はUSBを抜き差しする
-ls -l /dev/lekiwi
+make install-udev     # PC ごとに 1 回
+make serial-ids       # usb-1a86_… がサーボバス基板
 ```
 
-ルールを入れない場合も `/dev/ttyACM0` のまま使用できますが、
-**ModemManager 対策**が入らないため接続直後に通信が不安定になることがあります
-（詳細は `99-lekiwi.rules` のコメント参照）。
+ルールを入れない場合も使用できますが、**ModemManager 対策**が入らないため
+接続直後に通信が不安定になることがあります
+（詳細は `docker/robot/99-robot-serial.rules` のコメント参照）。
 
 現在ユーザーを `dialout` グループへ追加します。追加後はログアウト・ログインが必要です。
 
@@ -91,10 +88,10 @@ cp .env.example .env
 sed -i "s/^DIALOUT_GID=.*/DIALOUT_GID=$(getent group dialout | cut -d: -f3)/" .env
 ```
 
-udevルールを使う場合は `.env` を次のように変更します。
+`.env` の `LEKIWI_DEVICE` に、`make serial-ids` で調べた by-id パスを書きます。
 
 ```dotenv
-LEKIWI_DEVICE=/dev/lekiwi
+LEKIWI_DEVICE=/dev/serial/by-id/usb-1a86_…
 ```
 
 複数のROS 2システムが同じLANにある場合は、衝突しない `ROS_DOMAIN_ID`
@@ -433,8 +430,8 @@ grep DIALOUT_GID .env
 ### `Incorrect status packet!` が散発的に出る
 
 - **ModemManager** が接続直後にポートを探っている可能性が最も高いです。
-  `99-lekiwi.rules` を導入したか、`systemctl status ModemManager` を確認します
-- 他のプロセスがポートを使っていないか `lsof /dev/lekiwi` で確認する
+  `make install-udev` でルールを入れたか、`systemctl status ModemManager` を確認します
+- 他のプロセスがポートを使っていないか、`.env` の `LEKIWI_DEVICE` のパスを `lsof` で確認する
 - USBハブを外し、直接接続する
 
 ### ホイールが回らない（通信は成功している）
@@ -480,7 +477,6 @@ docker compose up --force-recreate
 - `Dockerfile`: ROS 2 Jazzy、feetech-servo-sdk、RViz、ドライバのビルド
 - `compose.yaml`: シリアルデバイス、ホストネットワーク、X11をコンテナへ渡す設定
 - `compose.dryrun.yaml`: 実機なし検証用（`devices` を持たず `dry_run:=true` 固定）
-- `99-lekiwi.rules`: 安定した `/dev/lekiwi` 名、dialout権限、ModemManager除外
 - `../../ros2_ws/src/lekiwi_base_bringup`: ドライバ本体、launch、設定、RViz
 - `../../ros2_ws/src/lekiwi_base_bringup/test`: 運動学とレイキャストの単体テスト（ROS 2 不要）
 - `../../ros2_ws/src/lekiwi_base_bringup/config/nav2.yaml`: Nav2 設定（オムニ向け差分入り）

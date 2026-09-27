@@ -13,6 +13,8 @@ wheels/
 .DS_Store
 
 *.env
+# make up-* ROBOT=<名前> で選んだ機体 (docker/robot/Makefile)
+docker/robot/.robot
 # images
 captured_images/
 outputs/
@@ -41,9 +43,4 @@ LeKiwi/
 #
 #   ★ docs/ 本体（利用者向けの文書）は main でも追跡する。README が
 #     8 本リンクしており、ignore すると clone した人が読めなくなるため。
-#
-#   ★ docs/agent/ だけは main に載せない。実機とのやり取り（依頼書と報告書）で、
-#     feat/* ブランチでのみ追跡する。実機側の agent はそちらを git pull する。
-#     マージのたびに `git rm -r --cached docs/agent CLAUDE.md` で外すこと。
-docs/agent/
 CLAUDE.md
