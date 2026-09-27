@@ -52,16 +52,18 @@ LiDAR / SLAM / Nav2 / SO-101 アーム / 手首カメラ（RealSense）を **1 �
 
 ```bash
 cd docker/robot
-cp .env.example .env      # ★ 先に実機に合わせて編集する
-make udev-dry-run BUS_MODE=shared
-make install-udev BUS_MODE=shared  # .env の LEKIWI_SERIAL からホストルールを生成
+make install-udev         # 全機体共通のudevルール。PC ごとに 1 回
+make serial-ids           # .env の *_DEVICE に書く by-id パスの候補
+cp .env.example .env      # ★ *_DEVICE を実機に合わせて書く
 make build
 make bootstrap            # ★ 初回とパッケージ追加時。上流取得 + colcon build + 静的検査
 ```
 
-split機では `.env` の `LEKIWI_SERIAL` と `SO101_SERIAL` を設定し、
-`make install-udev BUS_MODE=split` を使います。機体固有のシリアルを追跡対象の
-`.rules` へ直接書かないでください。
+`.env` の `LEKIWI_DEVICE` / `SO101_DEVICE` / `RPLIDAR_DEVICE` には
+`/dev/serial/by-id/` のパスを書きます（split 機は 3 本、shared 機と base 機は
+`SO101_DEVICE` を空に）。コンテナの中ではいつも `/dev/lekiwi`
+`/dev/so101_follower` `/dev/rplidar` に見えます。RPLIDAR のシリアル番号の
+書き換えを含む詳しい手順は [`../../README.md`](../../README.md) の 3 章です。
 
 `make bootstrap` は `ros2_ws` をホストからマウントしたまま `colcon build
 --symlink-install` する。成果物はホスト側の `ros2_ws/build`・`install` に残るので、
@@ -84,7 +86,8 @@ splitは `robots/so_follower/<SO101_ROBOT_ID>.json`、sharedは
 cd ../../lerobot_examples
 uv sync  # 初回のみ
 uv run lerobot-calibrate \
-  --robot.type=lekiwi --robot.id=my_lekiwi --robot.port=/dev/lekiwi
+  --robot.type=lekiwi --robot.id=my_lekiwi \
+  --robot.port=/dev/serial/by-id/usb-1a86_…   # .env の LEKIWI_DEVICE と同じパス
 ```
 
 sharedの固定配置は `7=left, 8=back, 9=right` です。異なるIDの較正JSONは起動時に

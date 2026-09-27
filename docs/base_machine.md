@@ -7,7 +7,8 @@ SO-101 アームを載せない機体の手順。**ベース + RPLIDAR + SLAM + 
 - アーム有りの手順は [`../README.md`](../README.md) と
   [`../docker/robot/README.md`](../docker/robot/README.md)
 
-必要なもの: `/dev/lekiwi`（ホイール 3 輪）、`/dev/rplidar`（RPLIDAR A1）。
+必要なもの: ベースのサーボバス基板（ホイール 3 輪）と RPLIDAR A1。
+コンテナの中ではそれぞれ `/dev/lekiwi` と `/dev/rplidar` に見える。
 
 ---
 
@@ -18,30 +19,34 @@ cd docker/robot
 cp .env.example .env
 ```
 
-書き換えるのは 2 つだけ。
+書き換えるのは 3 つ。
 
 ```bash
 DIALOUT_GID=20        # getent group dialout の GID
-LEKIWI_SERIAL=        # 下で調べる。SO101_SERIAL は空のままでよい
+LEKIWI_DEVICE=/dev/serial/by-id/usb-1a86_…                     # ベースの基板
+RPLIDAR_DEVICE=/dev/serial/by-id/usb-Silicon_Labs_CP2102_…     # LiDAR
+SO101_DEVICE=         # 空のまま
 ```
 
-```bash
-for d in /dev/ttyACM*; do
-  echo "$d $(udevadm info -q property -n "$d" | grep ID_SERIAL_SHORT)"
-done
-```
+パスは `make serial-ids` の出力からコピーする。
+
+★ **LiDAR の名前の末尾が `0001` なら、先にシリアル番号を書き換える。**
+RPLIDAR の USB 変換（CP2102）は全個体 `0001` で、このままでは別の機体の
+LiDAR と区別できない。手順は [`../README.md`](../README.md) の 3 章 ②。
+
+★ `/dev/lekiwi` や `/dev/rplidar` を書かないこと。共用機では別の機体を
+指していることがある。
 
 ---
 
 ## 2. udev
 
 ```bash
-make udev-dry-run BUS_MODE=base     # 生成されるルールを見るだけ
-make install-udev BUS_MODE=base     # sudo で /etc/udev/rules.d/ へ入れる
-ls -l /dev/lekiwi /dev/rplidar      # ★ 両方できていること
+make udev-dry-run     # 入れるルールを見るだけ
+make install-udev     # 全機体共通のルール。PC ごとに 1 回
 ```
 
-`base` は `lekiwi` と `rplidar` の 2 つだけ作る（`so101` は作らない）。
+このルールは機体を区別しない。機体の区別は 1 章の `.env` の by-id パスで行う。
 
 ---
 
@@ -70,13 +75,6 @@ make shell            # コンテナに入る
 
 ```bash
 ros2 launch lekiwi_base_bringup nav.launch.py
-```
-
-`.env` でデバイス名を変えた場合だけ渡す。
-
-```bash
-ros2 launch lekiwi_base_bringup nav.launch.py \
-    port:=/dev/lekiwi serial_port:=/dev/rplidar
 ```
 
 止めるのは `Ctrl+C`。**止める前にシェルを `exit` したり端末を閉じたりしないこと**
@@ -235,7 +233,7 @@ make release BUS_MODE=base          # ホイールを止めてトルクを切る
 | `Invalid frame ID "odom"` が `[INFO]` で延々出る | `base_driver` が居ない。★ INFO なのでエラーに見えないが、これは上の一次故障の結果 |
 | `Message Filter dropping message: frame 'laser_link'` | 同上。`odom` が無くスキャンを変換できない |
 | `rviz2: could not connect to display` | `DISPLAY` が空。`start_rviz:=false` で切るか、X のある端末から `make up-base` し直す（コンテナの `DISPLAY` は作成時に固定される） |
-| `/scan` が出ない | `sllidar_node` だけが死んでいる。`serial_port` と `/dev/rplidar` を確認 |
+| `/scan` が出ない | `sllidar_node` だけが死んでいる。`.env` の `RPLIDAR_DEVICE` が自分の LiDAR の by-id パスか確認 |
 
 ---
 
@@ -245,7 +243,8 @@ make release BUS_MODE=base          # ホイールを止めてトルクを切る
 
 | コマンド | 内容 |
 | --- | --- |
-| `make install-udev BUS_MODE=base` | `/dev/lekiwi` と `/dev/rplidar` の udev ルール |
+| `make install-udev` | 全機体共通の udev ルール（PC ごとに 1 回） |
+| `make serial-ids` | `.env` に書く by-id パスの候補 |
 | `make build` / `make bootstrap` | イメージとワークスペース |
 | `make up-base` | コンテナを起動 |
 | `make shell` | コンテナに入る |

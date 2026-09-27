@@ -104,12 +104,12 @@ docker compose up -d
 実機デバイスを渡す場合は`.env`を作成します。
 
 ```dotenv
-SO101_DEVICE=/dev/so101_follower
+SO101_DEVICE=/dev/serial/by-id/usb-1a86_…
 DIALOUT_GID=20
 ```
 
-udevの安定名を使わない環境では、`SO101_DEVICE=/dev/ttyACM0`のように指定し、
-launchの`usb_port`も同じパスにします。
+パスはリポジトリ直下の `make serial-ids` で調べます（`usb-1a86_…` が
+サーボバス基板）。launch の `usb_port` も同じパスにします。
 
 ## 3. 起動
 
