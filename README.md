@@ -92,18 +92,24 @@ git clone https://github.com/DiUS/cp210x-cfg.git ~/cp210x-cfg
 make -C ~/cp210x-cfg
 ```
 
-★ **LiDAR を 1 台だけ挿してから**実行します。`-d` を付けないと、
-最初に見つかった CP210x に書き込みます。
+★ **`-d` を必ず付けます。** 付けないと、最初に見つかった CP210x に書き込みます。
+書き込む LiDAR の `bus` と `dev` は `-l` の一覧で確かめます。
+LiDAR を 1 台だけ挿しておくと取り違えません。複数挿さっている場合は、
+対象を挿し直して `lsusb -d 10c4:ea60` の `Device` 番号が変わった方を選びます。
 
 ```bash
-sudo ~/cp210x-cfg/cp210x-cfg -l                    # CP210x の一覧と bus:dev
-sudo ~/cp210x-cfg/cp210x-cfg -d <bus:dev>          # 現在の値を表示するだけ
-sudo ~/cp210x-cfg/cp210x-cfg -d <bus:dev> -S rplidar-01
+sudo ~/cp210x-cfg/cp210x-cfg -l                # 一覧。"@ bus 001, dev 021" の形
+sudo ~/cp210x-cfg/cp210x-cfg -d 1.21           # 現在の値を表示するだけ。書式は bus.dev
+sudo ~/cp210x-cfg/cp210x-cfg -d 1.21 -S rplidar-1
 ```
 
 値は英数字とハイフンで、他の LiDAR と重ならないものにします。
-書いたら USB を挿し直し、`ls -l /dev/serial/by-id/` で名前の末尾が
-変わったことを確かめます。
+
+書き込むと CP2102 が自分でリセットして繋がり直すので、`-S` の出力に
+`failed to read cfg item … No such device` が出ます。**これは正常です。**
+挿し直しは要りません。`dev` の番号が変わるので、`-l` で番号を調べ直し、
+`-d` で読み直して `Serial:` を確かめます。`ls -l /dev/serial/by-id/` の
+名前の末尾も変わります。
 
 **③ by-id のパスを調べる**
 
