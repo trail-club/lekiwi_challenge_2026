@@ -1,126 +1,69 @@
 #!/usr/bin/env bash
-# 機体固有のUSBシリアルを .env から受け取り、ホストのudevルールを生成する。
-# 追跡対象のテンプレート自体は書き換えない。
+# 全機体共通の udev ルール (99-robot-serial.rules) をホストへ入れる。
+# PC ごとに 1 回だけでよい。機体を増やしても入れ直す必要は無い。
+#
+# 機体の区別はこのルールでは行わない。/dev/serial/by-id/ のパスを
+# docker/robot/.env の LEKIWI_DEVICE / SO101_DEVICE / RPLIDAR_DEVICE に書く。
 set -euo pipefail
 
-# モード: 生成するルールの組を決める。
-#   split : lekiwi + rplidar + so101
-#   shared: lekiwi + rplidar        (全モータが1本のバスに居る機体)
-#   base  : lekiwi + rplidar        (★ アームを取り外した機体)
-# shared と base でルールは同じだが、呼ぶ側の BUS_MODE を揃えておく。
-# アームの無い機体に shared を指定させると、そのまま
-# `make release BUS_MODE=shared` へ流れてアームの ID 1〜6 を探して失敗する。
 usage() {
-  echo "usage: $0 [--dry-run] split|shared|base" >&2
+  echo "usage: $0 [--dry-run]" >&2
   exit 2
 }
 
 dry_run=false
-if [[ "${1:-}" == "--dry-run" ]]; then
-  dry_run=true
-  shift
-fi
-mode="${1:-}"
-[[ "$mode" == "split" || "$mode" == "shared" || "$mode" == "base" ]] || usage
-[[ $# -eq 1 ]] || usage
+case "${1:-}" in
+  --dry-run) dry_run=true; shift ;;
+  "") ;;
+  *) usage ;;
+esac
+[[ $# -eq 0 ]] || usage
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-repo_dir="$(cd "$script_dir/../.." && pwd)"
-lekiwi_template="$repo_dir/docker/lekiwi_base_ros2/99-lekiwi.rules"
-so101_template="$repo_dir/docker/so101_ros2/99-so101.rules"
-rplidar_rule="$repo_dir/docker/rplidar_ros2/99-rplidar.rules"
+rule="$script_dir/99-robot-serial.rules"
+dest=/etc/udev/rules.d/99-robot-serial.rules
 
-validate_serial() {
-  local name="$1"
-  local value="$2"
-  if [[ -z "$value" ]]; then
-    echo "ERROR: $name が空です。docker/robot/.env に実機の ID_SERIAL_SHORT を設定してください。" >&2
-    exit 2
-  fi
-  if [[ ! "$value" =~ ^[A-Za-z0-9._:-]+$ ]]; then
-    echo "ERROR: $name にudevルールへ安全に埋め込めない文字が含まれています: $value" >&2
-    exit 2
-  fi
-}
-
-validate_serial LEKIWI_SERIAL "${LEKIWI_SERIAL:-}"
-if [[ "$mode" == "split" ]]; then
-  validate_serial SO101_SERIAL "${SO101_SERIAL:-}"
-fi
-
-report_installed() {
-  echo "udevルールをインストールしました ($mode)。"
-  if [[ "$mode" == "split" ]]; then
-    echo "確認: ls -l /dev/lekiwi /dev/so101_follower /dev/rplidar"
-  else
-    echo "確認: ls -l /dev/lekiwi /dev/rplidar"
+# 以前の方式 (機体ごとのシリアルを埋めて /dev/lekiwi 等を作る) のルール。
+# 共用機では他の利用者がまだ使っているかもしれないので、消さずに知らせるだけ。
+report_legacy() {
+  local found=()
+  for f in 99-lekiwi.rules 99-so101.rules 99-rplidar.rules; do
+    [[ -e "/etc/udev/rules.d/$f" ]] && found+=("/etc/udev/rules.d/$f")
+  done
+  if [[ ${#found[@]} -gt 0 ]]; then
+    echo "NOTE: 以前の方式のルールが残っています: ${found[*]}"
+    echo "      /dev/lekiwi 等はそれが作るもので、この機体を指すとは限りません。"
+    echo "      .env の *_DEVICE には /dev/serial/by-id/ のパスを書いてください。"
   fi
 }
 
 # 共用機 (dgx-spark など) には root 所有のヘルパーがあり、sudo が制限された
-# 一般ユーザーもこれだけは実行できる。ルールの中身はヘルパーが自分で持ち、
-# 受け取るのはモードとシリアルだけ。利用者が書き換えられるこのリポジトリの
-# ファイルを root で読ませないため (udev ルールは RUN+= で任意のコマンドを走らせる)。
-#   install-robot-udev [--dry-run] split|shared|base LEKIWI_SERIAL [SO101_SERIAL]
-# ヘルパーは下の処理 (/dev の同名ディレクトリの確認・ルールの配置・reload・
-# trigger) を一通り行う。--dry-run は root なしで動き、下と同じ形式で表示する。
-# ★ 共用機に入るのはヘルパーのルールで、下のテンプレートではない。
-#   テンプレートを変えたらヘルパー側 (trail-club/directory-access) も揃えること。
+# 一般ユーザーもこれだけは実行できる。ルールの中身はヘルパーが自分で持つ。
+# 利用者が書き換えられるこのリポジトリのファイルを root で読ませないため
+# (udev ルールは RUN+= で任意のコマンドを走らせる)。
+#   install-robot-udev [--dry-run]
+# ★ 共用機に入るのはヘルパーのルールで、99-robot-serial.rules ではない。
+#   このファイルを変えたらヘルパー側 (trail-club/directory-access) も揃えること。
 helper=/usr/local/sbin/install-robot-udev
 if [[ -x "$helper" ]]; then
-  helper_args=("$mode" "$LEKIWI_SERIAL")
-  if [[ "$mode" == "split" ]]; then
-    helper_args+=("$SO101_SERIAL")
-  fi
   if [[ "$dry_run" == true ]]; then
-    "$helper" --dry-run "${helper_args[@]}"
+    "$helper" --dry-run
     exit 0
   fi
-  sudo "$helper" "${helper_args[@]}"
-  report_installed
+  sudo "$helper"
+  report_legacy
   exit 0
-fi
-
-tmp_dir="$(mktemp -d)"
-trap 'rm -rf "$tmp_dir"' EXIT
-sed "s/@LEKIWI_SERIAL@/${LEKIWI_SERIAL}/g" "$lekiwi_template" > "$tmp_dir/99-lekiwi.rules"
-cp "$rplidar_rule" "$tmp_dir/99-rplidar.rules"
-if [[ "$mode" == "split" ]]; then
-  sed "s/@SO101_SERIAL@/${SO101_SERIAL}/g" "$so101_template" > "$tmp_dir/99-so101.rules"
 fi
 
 if [[ "$dry_run" == true ]]; then
-  for rule in "$tmp_dir"/*.rules; do
-    echo "--- $(basename "$rule") ---"
-    sed -n '/^SUBSYSTEM/p' "$rule"
-  done
+  echo "--- $dest ---"
+  sed -n '/^SUBSYSTEM/,/^$/p' "$rule"
   exit 0
 fi
 
-for device_name in lekiwi rplidar; do
-  device_path="/dev/$device_name"
-  if [[ -d "$device_path" && ! -L "$device_path" ]]; then
-    echo "ERROR: $device_path がディレクトリです。先に次を実行してください:" >&2
-    echo "  sudo rmdir $device_path" >&2
-    exit 1
-  fi
-done
-if [[ "$mode" == "split" && -d /dev/so101_follower && ! -L /dev/so101_follower ]]; then
-  echo "ERROR: /dev/so101_follower がディレクトリです。先に次を実行してください:" >&2
-  echo "  sudo rmdir /dev/so101_follower" >&2
-  exit 1
-fi
-
-sudo install -m 0644 "$tmp_dir/99-lekiwi.rules" /etc/udev/rules.d/99-lekiwi.rules
-sudo install -m 0644 "$tmp_dir/99-rplidar.rules" /etc/udev/rules.d/99-rplidar.rules
-if [[ "$mode" == "split" ]]; then
-  sudo install -m 0644 "$tmp_dir/99-so101.rules" /etc/udev/rules.d/99-so101.rules
-else
-  # shared機・アーム無し機で過去のsplit用ルールを勝手に消さない。
-  # 別機体との併用を壊さないため。
-  true
-fi
-
+sudo install -m 0644 "$rule" "$dest"
 sudo udevadm control --reload-rules
 sudo udevadm trigger --subsystem-match=tty
-report_installed
+echo "udevルールをインストールしました: $dest"
+report_legacy
+echo "次: ls -l /dev/serial/by-id/ で機体のパスを調べ、.env の *_DEVICE に書く"

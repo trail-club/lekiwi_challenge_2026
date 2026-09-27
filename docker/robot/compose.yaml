@@ -66,9 +66,10 @@ services:
     # devices: の宛先を /dev の devtmpfs に作らない。その結果、ホストに
     # /dev/so101_follower があっても、コンテナ内の同名パスが欠落する。
     #
-    # bind mount は udev のシンボリックリンクをホスト側で解決してから
-    # 宛先のデバイスノードを作るため、既存構成と同じパスをコンテナ内で
-    # 利用できる。privileged と /dev/bus/usb は RealSense 用に残す。
+    # bind mount はホスト側のシンボリックリンク (/dev/serial/by-id/…) を
+    # 解決してから宛先にデバイスノードを作るため、コンテナ内では
+    # /dev/lekiwi 等の固定名で使える。privileged と /dev/bus/usb は
+    # RealSense 用に残す。
     group_add:
       - ${DIALOUT_GID:-20}
 
@@ -105,12 +106,13 @@ services:
 
     volumes:
       # privileged コンテナでは devices: の /dev 宛先が作られないため、
-      # シリアルは bind mount で既存の安定名をそのまま渡す。
+      # シリアルは bind mount で渡す。ホスト側は機体ごとの by-id パス、
+      # コンテナ側は固定名 (launch の既定値と揃える)。
       - type: bind
-        source: ${RPLIDAR_DEVICE:-/dev/rplidar}
-        target: ${RPLIDAR_DEVICE:-/dev/rplidar}
+        source: ${RPLIDAR_DEVICE:?docker/robot/.env に /dev/serial/by-id/ のパスを書くこと}
+        target: /dev/rplidar
         bind:
-          # デバイスが無いときに同名ディレクトリを作るとudev symlinkを妨害する。
+          # デバイスが無いときにディレクトリを作らせず、起動を失敗させる。
           create_host_path: false
       # ★ ROS ワークスペースはホストからマウントする。イメージにパッケージを
       #   焼き込まないので、lekiwi_description も so_arm101_description も

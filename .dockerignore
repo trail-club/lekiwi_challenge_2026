@@ -21,12 +21,11 @@ docker/rplidar_ros2/README.md
 docker/rplidar_ros2/99-rplidar.rules
 docker/lekiwi_base_ros2/.env
 docker/lekiwi_base_ros2/README.md
-docker/lekiwi_base_ros2/99-lekiwi.rules
 docker/so101_ros2/.env
 docker/so101_ros2/README.md
-docker/so101_ros2/99-so101.rules
 docker/robot/.env
 docker/robot/README.md
+docker/robot/99-robot-serial.rules
 
 # ★ ワークスペースのビルド成果物と上流クローン。
 #   マウント方式へ移行してホスト側に生成されるようになったが、

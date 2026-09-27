@@ -16,7 +16,7 @@ services:
   robot:
     volumes:
       - type: bind
-        source: ${LEKIWI_DEVICE:-/dev/lekiwi}
-        target: ${LEKIWI_DEVICE:-/dev/lekiwi}
+        source: ${LEKIWI_DEVICE:?docker/robot/.env に /dev/serial/by-id/ のパスを書くこと}
+        target: /dev/lekiwi
         bind:
           create_host_path: false

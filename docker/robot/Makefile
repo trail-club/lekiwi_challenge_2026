@@ -3,7 +3,8 @@
 # 使い方:
 #   make build       イメージをビルド
 #   make bootstrap   ★ 初回とパッケージ追加時。上流取得 + colcon build + 静的検査
-#   make install-udev BUS_MODE=shared|split|base  .env からホストudevルールを生成
+#   make install-udev  全機体共通のudevルールを入れる (PC ごとに 1 回)
+#   make serial-ids    .env の *_DEVICE に書く by-id パスの候補を表示
 #   make up-split / make up-shared / make up-base  コンテナだけ起動
 #   make run-split SO101_ROBOT_ID=my_follower
 #   make run-shared LEKIWI_ROBOT_ID=my_lekiwi
@@ -57,17 +58,22 @@ MOCK_START_RVIZ ?= false
 #   レシピ内で `$$LEKIWI_DEVICE` と書いても**必ず空**になる (以前これで
 #   .env の設定が黙って無視されていた)。make 変数として `?=` で既定値を与え、
 #   `$(...)` で参照すること。
-#   compose.yaml 側の `${LEKIWI_DEVICE:-...}` は docker compose が .env を
+#   compose.yaml 側の `${LEKIWI_DEVICE:?...}` は docker compose が .env を
 #   自分で読むので別経路。
-LEKIWI_DEVICE  ?= /dev/lekiwi
-SO101_DEVICE   ?= /dev/so101_follower
-RPLIDAR_DEVICE ?= /dev/rplidar
+#
+# ★ *_DEVICE はホスト側のパス。機体ごとの /dev/serial/by-id/… を .env に書く。
+#   既定値は置かない。共用機では /dev/lekiwi のような名前が他の機体を指して
+#   いることがあり、既定値で動くと他人の機体を掴む。
+LEKIWI_DEVICE  ?=
+SO101_DEVICE   ?=
+RPLIDAR_DEVICE ?=
 MAP_DIR        ?= $(HOME)/maps
 
-# USBシリアルは機体固有なので追跡ファイルへ書かない。.env からudev生成処理へ渡す。
-LEKIWI_SERIAL ?=
-SO101_SERIAL  ?=
-export LEKIWI_SERIAL SO101_SERIAL
+# コンテナ内のデバイス名。compose の bind 宛先と launch の既定値に揃えてある。
+# ホスト側 (機体ごとの by-id パス) は上の *_DEVICE。
+CT_LEKIWI  := /dev/lekiwi
+CT_SO101   := /dev/so101_follower
+CT_RPLIDAR := /dev/rplidar
 
 # ★ 別スタックのコンテナが同じ ROS_DOMAIN_ID に居ると /robot_description が
 #   二重に latch され、/tf も混信する (CLAUDE.md の「RViz に別のロボットが出る」)。
@@ -83,7 +89,7 @@ LEGACY += lekiwi-nav lekiwi-nav-mock lekiwi-so101-arm lekiwi-so101-arm-mock \
 CONFLICTS_FOR_REAL := $(LEGACY) $(SVC_MOCK)
 CONFLICTS_FOR_MOCK := $(LEGACY) $(SVC)
 
-.PHONY: build bootstrap install-udev udev-dry-run up-split up-shared up-base \
+.PHONY: build bootstrap install-udev udev-dry-run serial-ids up-split up-shared up-base \
         run-split run-shared run-base run-base-map \
         mock-split mock-shared mock-base shell stow save-map check check-base release \
         release-wheels release-check down logs guard guard-mock require-bus-mode \
@@ -99,13 +105,19 @@ build:
 bootstrap:
 	docker compose -f compose.mock.yaml run --rm $(SVC_MOCK) bash /bootstrap.sh
 
-# 追跡対象の.rulesはテンプレート。機体固有値を.envから埋めてホストへ入れる。
-# dry-runはsudoも書き込みも行わず、生成されるルールだけを表示する。
-install-udev: require-bus-mode
-	bash ./install_udev.sh $(BUS_MODE)
+# 全機体共通のルール。機体固有の値を含まないので BUS_MODE も .env も要らない。
+# dry-runはsudoも書き込みも行わず、入れるルールだけを表示する。
+install-udev:
+	bash ./install_udev.sh
 
-udev-dry-run: require-bus-mode
-	bash ./install_udev.sh --dry-run $(BUS_MODE)
+udev-dry-run:
+	bash ./install_udev.sh --dry-run
+
+# 1a86_* が WaveShare のサーボバス基板 (ベースとアームで同じ型番)。
+# Silicon_Labs_CP2102_* が RPLIDAR。★ 末尾のシリアルが 0001 の LiDAR は
+# 区別できないので、先にシリアルを書き換えること (README.md の 3 章)。
+serial-ids:
+	@ls -l /dev/serial/by-id/ 2>/dev/null || echo "USBシリアルが1本も繋がっていない" >&2
 
 # $(1) に渡した名前のコンテナが動いていたら止めさせる。
 define guard_against
@@ -132,15 +144,20 @@ guard:
 guard-mock:
 	$(call guard_against,$(CONFLICTS_FOR_MOCK))
 
+# $(1) = 変数名, $(2) = 値
+define require_device
+	@test -n "$(2)" || { \
+	  echo "ERROR: .env の $(1) が空。make serial-ids で調べた /dev/serial/by-id/ のパスを書くこと" >&2; exit 1; }
+	@test -c "$(2)" || { \
+	  echo "ERROR: $(1)=$(2) が文字デバイスではない。USB接続と make serial-ids を確認すること" >&2; exit 1; }
+endef
+
 preflight-shared-devices:
-	@test -c "$(LEKIWI_DEVICE)" || { \
-	  echo "ERROR: $(LEKIWI_DEVICE) が文字デバイスではない。make install-udev BUS_MODE=shared とUSB接続を確認すること" >&2; exit 1; }
-	@test -c "$(RPLIDAR_DEVICE)" || { \
-	  echo "ERROR: $(RPLIDAR_DEVICE) が文字デバイスではない。udevとLiDAR接続を確認すること" >&2; exit 1; }
+	$(call require_device,LEKIWI_DEVICE,$(LEKIWI_DEVICE))
+	$(call require_device,RPLIDAR_DEVICE,$(RPLIDAR_DEVICE))
 
 preflight-split-devices: preflight-shared-devices
-	@test -c "$(SO101_DEVICE)" || { \
-	  echo "ERROR: $(SO101_DEVICE) が文字デバイスではない。make install-udev BUS_MODE=split とUSB接続を確認すること" >&2; exit 1; }
+	$(call require_device,SO101_DEVICE,$(SO101_DEVICE))
 
 # アームを取り外した機体が要るのはベースとLiDARの2つだけ。shared機と同じ。
 preflight-base-devices: preflight-shared-devices
@@ -170,16 +187,16 @@ run-split: up-split
 		ros2 launch lekiwi_so101_bringup robot.launch.py \
 		motor_bus_mode:=split backend:=$(BACKEND) \
 		robot_id:=$(SO101_ROBOT_ID) start_rviz:=$(START_RVIZ) \
-		lekiwi_port:=$(LEKIWI_DEVICE) \
-		usb_port:=$(SO101_DEVICE) \
-		lidar_port:=$(RPLIDAR_DEVICE)
+		lekiwi_port:=$(CT_LEKIWI) \
+		usb_port:=$(CT_SO101) \
+		lidar_port:=$(CT_RPLIDAR)
 
 run-shared: up-shared
 	docker compose -f compose.yaml exec -it $(SVC) $(E) \
 		ros2 launch lekiwi_so101_bringup robot.launch.py \
 		motor_bus_mode:=shared backend:=$(BACKEND) \
 		robot_id:=$(LEKIWI_ROBOT_ID) start_rviz:=$(START_RVIZ) \
-		lekiwi_port:=$(LEKIWI_DEVICE) lidar_port:=$(RPLIDAR_DEVICE)
+		lekiwi_port:=$(CT_LEKIWI) lidar_port:=$(CT_RPLIDAR)
 
 # ★ アーム無し機体。robot.launch.py ではなく lekiwi_base_bringup を直接呼ぶ。
 #   結合 URDF もアームの ros2_control も要らないので、合成パッケージを通す
@@ -189,8 +206,8 @@ run-shared: up-shared
 run-base: up-base
 	docker compose -f compose.yaml exec -it $(SVC) $(E) \
 		ros2 launch lekiwi_base_bringup nav.launch.py \
-		port:=$(LEKIWI_DEVICE) \
-		serial_port:=$(RPLIDAR_DEVICE) \
+		port:=$(CT_LEKIWI) \
+		serial_port:=$(CT_RPLIDAR) \
 		start_rviz:=$(START_RVIZ)
 
 # ★ 保存済み地図 + AMCL。slam_toolbox の代わりに map_server + amcl を使う。
@@ -201,8 +218,8 @@ run-base-map: up-base
 	docker compose -f compose.yaml exec -it $(SVC) $(E) \
 		ros2 launch lekiwi_base_bringup nav_with_map.launch.py \
 		map_file:=$(MAP_FILE) \
-		port:=$(LEKIWI_DEVICE) \
-		serial_port:=$(RPLIDAR_DEVICE) \
+		port:=$(CT_LEKIWI) \
+		serial_port:=$(CT_RPLIDAR) \
 		start_rviz:=$(START_RVIZ)
 
 mock-split: guard-mock
@@ -357,14 +374,14 @@ define release_all_cmd
 	  echo "コンテナ $(SVC) は動いています。その中で実行します。"; \
 	  docker compose -f compose.yaml exec $(1) $(SVC) $(E) \
 	    ros2 run lekiwi_so101_bringup release_all --bus-mode $(RELEASE_BUS_MODE) \
-	      --shared-port $(LEKIWI_DEVICE) --wheel-port $(LEKIWI_DEVICE) \
-	      --arm-port $(SO101_DEVICE) $(RELEASE_ONLY) $(2); \
+	      --shared-port $(CT_LEKIWI) --wheel-port $(CT_LEKIWI) \
+	      --arm-port $(CT_SO101) $(RELEASE_ONLY) $(2); \
 	else \
 	  echo "コンテナ $(SVC) は動いていません。使い捨てコンテナで実行します。"; \
 	  docker compose -f compose.yaml -f $(RELEASE_COMPOSE) run --rm $(1) $(SVC) $(E) \
 	    ros2 run lekiwi_so101_bringup release_all --bus-mode $(RELEASE_BUS_MODE) \
-	      --shared-port $(LEKIWI_DEVICE) --wheel-port $(LEKIWI_DEVICE) \
-	      --arm-port $(SO101_DEVICE) $(RELEASE_ONLY) $(2); \
+	      --shared-port $(CT_LEKIWI) --wheel-port $(CT_LEKIWI) \
+	      --arm-port $(CT_SO101) $(RELEASE_ONLY) $(2); \
 	fi
 endef
 
