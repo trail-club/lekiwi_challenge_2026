@@ -233,6 +233,7 @@ make release BUS_MODE=base          # ホイールを止めてトルクを切る
 | `Invalid frame ID "odom"` が `[INFO]` で延々出る | `base_driver` が居ない。★ INFO なのでエラーに見えないが、これは上の一次故障の結果 |
 | `Message Filter dropping message: frame 'laser_link'` | 同上。`odom` が無くスキャンを変換できない |
 | `rviz2: could not connect to display` | `DISPLAY` が空。`start_rviz:=false` で切るか、X のある端末から `make up-base` し直す（コンテナの `DISPLAY` は作成時に固定される） |
+| `Authorization required` のあと `could not connect to display`（リモートデスクトップのときだけ） | コンテナに X の認証クッキーが渡っていない。`make` は `XAUTHORITY` が空なら `~/.Xauthority` を渡す。`make` を通さず `docker compose` を直接叩いたなら `export XAUTHORITY=~/.Xauthority` してから `make up-base` し直す |
 | `/scan` が出ない | `sllidar_node` だけが死んでいる。`.env` の `RPLIDAR_DEVICE` が自分の LiDAR の by-id パスか確認 |
 
 ---
