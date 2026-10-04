@@ -346,10 +346,40 @@ motor_ids: [9, 8, 7]
 #### D4: 総合確認
 
 すべて正しければ、teleopで約1m四方を走らせ、RVizの `/odom` 軌跡が
-概ね四角くなることを確認します。オープンループなのでドリフトは想定内で、
-**見るのは形と向きだけ**です。
+概ね四角くなることを確認します。エンコーダでも車輪の滑りは見えないので
+ドリフトは想定内で、**見るのは形と向きだけ**です。
 
 RViz上で車輪が逆回転して見える場合は表示だけの問題で、走行には影響しません。
+
+#### D5: 距離と角度の倍率 → `wheel_radius` / `base_radius`
+
+D1〜D4 で向きが確定したら、床に下ろして `calibrate_odom` で倍率を合わせます。
+エンコーダ odom を、静止中に取った生 `/scan` 同士の ICP（LiDAR の位置合わせ）と
+比べます。★ **ロボットが動きます**。周囲 0.4 m 以上を空け、`make run-base` を
+起動した状態で別ターミナルから実行します。
+
+```bash
+make shell
+ros2 run lekiwi_base_bringup calibrate_odom                          # 並進 + 回転
+ros2 run lekiwi_base_bringup calibrate_odom --ros-args -p linear_repeats:=0       # 回転だけ
+ros2 run lekiwi_base_bringup calibrate_odom --ros-args -p "rotation_angles_deg:=[0.0]"  # 並進だけ
+```
+
+- 動作は前後左右 0.15 m × 2 回と、その場で ±360° × 2 回。どれも元の位置付近へ戻ります
+- 結果は表示され `/maps/odom_calibration.json`（ホストの `MAP_DIR`）に残ります。
+  **base.yaml は書き換えません。** 提案値を確認してから `wheel_radius` / `base_radius` に反映します
+- 並進の倍率で `wheel_radius` を、残りの回転の倍率で `base_radius` を直します
+  （odom の並進は r に、回転は r/R に比例）。測らなかった方は現状維持です
+- 真値に slam_toolbox を使わないのは、0.1 m / 0.1 rad 動くまでスキャンを処理せず、
+  止まる直前の動きが反映されないためです
+
+★ 精度の目安と注意:
+
+- 最初に動かさずに ICP を 1 回回し、雑音（mm 単位）を表示します。ここで
+  `ICP が信用できない` と出たら、動く物（人）が映っていないか確認します
+- 回転は 360° 単位にします。1 周すれば視点が戻るので、家具の脚ばかりの部屋でも合います
+- 並進は視点が変わるぶん重なりが減ります。0.30 m では重なりが 6 割を切り数 cm ずれた
+  実績があるので、既定は 0.15 m です。壁が近くに見える場所で行うほど精度が出ます
 
 ## 7. キーボードで走らせる
 
@@ -435,6 +465,14 @@ grep DIALOUT_GID .env
   `make install-udev` でルールを入れたか、`systemctl status ModemManager` を確認します
 - 他のプロセスがポートを使っていないか、`.env` の `LEKIWI_DEVICE` のパスを `lsof` で確認する
 - USBハブを外し、直接接続する
+
+### `位置エンコーダ読み取り失敗` が続く / 3 台とも応答しなくなる
+
+- 3 台同時に応答しないなら、まず**ベースの 12V 電源**（バッテリー残量・スイッチ）を疑います。
+  USB 基板は DGX から給電されるので `/dev/serial/by-id/` には残り続けます
+- `位置エンコーダの欠測が 0.50s を超えたため車輪を停止します` は、走行中に読めなくなったときの
+  安全停止です。読めるようになれば自動で走行を再開します
+- 電源を戻したら `make release-check BUS_MODE=base` で状態を読み、必要なら `make release BUS_MODE=base`
 
 ### ホイールが回らない（通信は成功している）
 

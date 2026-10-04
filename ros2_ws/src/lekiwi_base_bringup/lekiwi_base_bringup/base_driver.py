@@ -243,8 +243,8 @@ class LekiwiBaseDriver(Node):
     def _now_s(self) -> float:
         return self.get_clock().now().nanoseconds * 1e-9
 
-    def _read_positions(self) -> list[int]:
-        positions = self.bus.read_positions()
+    def _read_positions(self, retries: int | None = None) -> list[int]:
+        positions = self.bus.read_positions(retries=retries)
         return [positions[motor_id] for motor_id in self.motor_ids]
 
     def _reset_encoder_baseline(self) -> None:
@@ -262,7 +262,9 @@ class LekiwiBaseDriver(Node):
         if self.bus is None or self.encoder.positions is None:
             return None
         try:
-            positions = self._read_positions()
+            # ★ 制御周期では再試行しない。失敗した周期は飛ばし、次の周期で
+            #   まとめて差分を取る。続けば is_stale が車輪を止める
+            positions = self._read_positions(retries=0)
         except StsBusError as exc:
             failures = self.encoder.record_failure()
             self.get_logger().warn(

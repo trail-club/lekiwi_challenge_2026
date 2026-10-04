@@ -312,19 +312,25 @@ class StsBus:
             for motor_id in self.ids
         }
 
-    def read_positions(self) -> dict[int, int]:
+    def read_positions(self, retries: int | None = None) -> dict[int, int]:
         """全モータの位置エンコーダ値を 1 回の同期要求で読む。
 
         STS3215 の ``Present_Position`` は 1 回転 4096 count で周回する。
         速度レジスタは停止中にも小さな非ゼロ値を返す個体があるため、制御周期の
         オドメトリにはこちらの位置差分を使う。
+
+        ``retries`` は失敗時の再試行回数 (既定は ``num_retry``)。1 回の失敗は
+        パケットタイムアウト (約 50 ms) を待つので、★ 制御周期から呼ぶときは 0 に
+        する。既定の 5 回だと 1 回の読み取りで約 0.3 s 止まり、その間は速度指令が
+        更新されずサーボは直前の速度で回り続ける (実機の 360° 回転中に 0.9 s 止まり、
+        odom から約 30° が抜けた)。
         """
         self._assert_connected()
         if self._sync_position_reader is None:
             raise StsBusError("位置同期読み取りが初期化されていない")
 
         result = None
-        for _ in range(1 + self.num_retry):
+        for _ in range(1 + (self.num_retry if retries is None else retries)):
             result = self._sync_position_reader.txRxPacket()
             if result == scs.COMM_SUCCESS:
                 return {
