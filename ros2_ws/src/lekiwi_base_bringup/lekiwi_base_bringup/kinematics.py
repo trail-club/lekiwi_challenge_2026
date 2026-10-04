@@ -100,6 +100,24 @@ def wheel_ticks_to_body(
     return float(vx), float(vy), float(np.degrees(wz_rad))
 
 
+def encoder_position_deltas(current, previous) -> np.ndarray:
+    """STS3215 の位置カウント差を 1 回転の境界をまたいで復元する。
+
+    ``Present_Position`` は 0..4095 で周回する。50 Hz で読む通常動作では
+    1 サンプル間に半回転を超えないため、差分を ``[-2048, 2048)`` に折り返せば
+    各車輪の実移動量になる。
+    """
+    current_array = np.asarray(current, dtype=float)
+    previous_array = np.asarray(previous, dtype=float)
+    if current_array.shape != previous_array.shape:
+        raise ValueError(
+            f"current と previous の形が異なる: "
+            f"{current_array.shape} != {previous_array.shape}"
+        )
+    half = TICKS_PER_REV / 2.0
+    return (current_array - previous_array + half) % TICKS_PER_REV - half
+
+
 def ticks_to_radps(ticks: float, direction_sign: float = 1.0) -> float:
     """生の速度値 → 車輪の角速度 [rad/s] (``/joint_states`` 用)。"""
     return np.radians(ticks / STEPS_PER_DEG) * direction_sign

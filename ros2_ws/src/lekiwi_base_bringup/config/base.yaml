@@ -15,7 +15,7 @@
     motor_ids: [7, 8, 9]
     wheel_radius: 0.05         # CAD 実測 0.050784、公称 0.05
     # CAD 補正値は 0.1225 だが、実機検証済みコードと lerobot が 0.125 なので
-    # そちらに揃える。差はオープンループ odom の wz に 2% のスケール誤差のみ。
+    # そちらに揃える。差はエンコーダ odom の wz に 2% のスケール誤差のみ。
     base_radius: 0.125
 
     # ★ Phase D2 で調整する唯一のノブ。
@@ -41,6 +41,9 @@
     # ── 制御 ────────────────────────────────────────────────────────
     control_rate_hz: 50.0
     cmd_vel_timeout_s: 0.5     # これ以上 /cmd_vel が来なければ停止
+    # serial backend では3輪の位置エンコーダを同期読み取りし、実測差分から
+    # odom / TF / joint_states を生成する。false は診断用の旧オープンループ動作。
+    use_encoder_odometry: true
     servo_acceleration: 20     # レジスタ 41。負値で書き込みを省略
                                # ガクつくなら上げる、急発進するなら下げる
 

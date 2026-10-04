@@ -146,19 +146,19 @@ shared: /lekiwi/hardware_wheel_commands → lerobot_bridge
 
 戻りは **`/odom` と `/joint_states`（車輪 3 関節）と TF `odom → base_footprint`**。
 
-### ★ `/odom` は実測ではありません
+### ★ `/odom` は車輪エンコーダ実測です（serial backend）
 
-`base_driver.py` の冒頭にこう書いてあります。
+実機の serial backend では、STS3215 3輪の ``Present_Position`` を同期読み取りし、
+4096 count/回転の位置差分を逆運動学へ通して ``/odom`` を生成します。
 
-> オドメトリは **送った指令値の積分** であって実測ではない。飽和と整数丸めは
-> 反映されるが、スリップも外乱も検出できない。自己位置は後段の LiDAR/SLAM が
-> 担当する前提。
+``bridge`` / ``dry_run`` または ``use_encoder_odometry:=false`` の場合だけ、
+送った指令値を積分する旧方式へ戻ります。
 
-つまり:
+注意点:
 
-- 車輪が滑っても `/odom` は動いたことにします
-- **アームを振った反動でずれても `/odom` には出ません**
-- 自己位置の真の担い手は `slam_toolbox` です
+- モータ軸の回転量は実測できます
+- 車輪の空転やオムニローラーの横滑りはエンコーダだけでは検出できません
+- LiDAR の `slam_toolbox` / AMCL と組み合わせて地図座標の誤差を補正します
 
 ### 安全に関わる作り
 
@@ -236,7 +236,7 @@ RPLIDAR は 360° を測ります。そのままだと**自分の後輪とボデ
 map
  │  slam_toolbox（sim でも実機でも同じ）
  └─ odom
-     │  base_driver（指令値の積分）
+     │  base_driver（serial 実機は車輪エンコーダ、sim/bridge は指令値積分）
      └─ base_footprint
          │  robot_state_publisher（URDF の固定ジョイント）
          └─ base_link

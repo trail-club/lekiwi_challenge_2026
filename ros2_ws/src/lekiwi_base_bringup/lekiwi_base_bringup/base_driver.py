@@ -1,11 +1,13 @@
 """LeKiwi 3輪オムニベースの ROS 2 ドライバ。
 
 ``/cmd_vel`` を購読して 3 個の STS3215 (ID 7/8/9) に速度指令を送り、
-オープンループのオドメトリと TF、``/joint_states`` を出す。
+位置エンコーダ実測値からオドメトリと TF、``/joint_states`` を出す。
 
-オドメトリは **送った指令値の積分** であって実測ではない。飽和と整数丸めは
-反映されるが、スリップも外乱も検出できない。自己位置は後段の LiDAR/SLAM が
-担当する前提。
+serial backend では3輪の ``Present_Position`` を同期読み取りし、4096 count の
+周回を補正した差分から実測車輪速度を求める。bridge / dry_run または
+``use_encoder_odometry:=false`` の場合だけ、送信指令を積分する旧方式へ戻る。
+車輪スリップはエンコーダだけでは検出できないため、自己位置は後段の
+LiDAR/SLAM と組み合わせる。
 
 安全に関わる設計:
   * ``cmd_vel_timeout_s`` 無指令でウォッチドッグが速度をゼロにする
@@ -63,6 +65,7 @@ class LekiwiBaseDriver(Node):
         self.declare_parameter("max_ticks", 3000)
         self.declare_parameter("control_rate_hz", 50.0)
         self.declare_parameter("cmd_vel_timeout_s", 0.5)
+        self.declare_parameter("use_encoder_odometry", True)
         self.declare_parameter("max_linear_x", 0.26)
         self.declare_parameter("max_linear_y", 0.23)
         self.declare_parameter("max_angular_z", 1.8)
@@ -81,6 +84,7 @@ class LekiwiBaseDriver(Node):
         self.base_radius = float(p("base_radius").value)
         self.max_ticks = int(p("max_ticks").value)
         self.cmd_vel_timeout_s = float(p("cmd_vel_timeout_s").value)
+        self.use_encoder_odometry = bool(p("use_encoder_odometry").value)
         self.odom_frame = str(p("odom_frame").value)
         self.base_frame = str(p("base_frame").value)
         self.publish_tf = bool(p("publish_tf").value)
@@ -119,6 +123,9 @@ class LekiwiBaseDriver(Node):
         self.odom_yaw = 0.0
         self.wheel_positions = np.zeros(3)  # 車輪の積算回転角 [rad]
         self.last_tick_time = self.get_clock().now()
+        self.last_encoder_time = self.get_clock().now()
+        self.last_encoder_positions: np.ndarray | None = None
+        self.encoder_read_failures = 0
         self.bus: StsBus | None = None
         self.wheel_command_pub = None
         self._warned_stale = False
@@ -157,6 +164,14 @@ class LekiwiBaseDriver(Node):
         else:
             self._connect_bus()
 
+        if self.use_encoder_odometry and (
+            self.hardware_backend != "serial" or self.dry_run
+        ):
+            self.get_logger().warn(
+                "encoder odometry は実機 serial backend 専用です。"
+                "この起動では指令値積分を使います"
+            )
+
         # ── タイマー (バス確立後に回し始める) ───────────────────────
         # ここから先で失敗したらトルクを入れたまま抜けてしまうので、
         # 必ず停止処理を通してから送出し直す。
@@ -177,7 +192,8 @@ class LekiwiBaseDriver(Node):
         self.get_logger().info(
             f"起動: backend={self.hardware_backend} port={p('port').value} "
             f"ids={self.motor_ids} "
-            f"r={self.wheel_radius} R={self.base_radius} {rate:.0f}Hz"
+            f"r={self.wheel_radius} R={self.base_radius} {rate:.0f}Hz "
+            f"odom={'encoder' if self._encoder_odometry_active else 'command'}"
         )
         self.get_logger().info(
             f"max_ticks={self.max_ticks} から求まる到達可能な上限: "
@@ -208,8 +224,67 @@ class LekiwiBaseDriver(Node):
             self.get_logger().warn(f"想定外のモデル番号: {wrong} (STS3215 は {STS3215_MODEL_NUMBER})")
 
         accel = int(p("servo_acceleration").value)
+        if self.use_encoder_odometry:
+            self._reset_encoder_baseline()
         self.bus.configure_velocity_mode(accel if accel >= 0 else None)
+        self.last_encoder_time = self.get_clock().now()
         self.get_logger().info("速度モード設定完了、トルク ON")
+
+    @property
+    def _encoder_odometry_active(self) -> bool:
+        return bool(
+            self.use_encoder_odometry
+            and self.hardware_backend == "serial"
+            and not self.dry_run
+            and self.bus is not None
+        )
+
+    def _reset_encoder_baseline(self) -> None:
+        if self.bus is None:
+            self.last_encoder_positions = None
+            return
+        positions = self.bus.read_positions()
+        self.last_encoder_positions = np.asarray(
+            [positions[motor_id] for motor_id in self.motor_ids], dtype=float
+        )
+        self.last_encoder_time = self.get_clock().now()
+        self.encoder_read_failures = 0
+
+    def _read_encoder_motion(self, now):
+        """位置差分から ``(ticks/s, dt, delta_counts)`` を返す。
+
+        読み取り失敗時は基準値を保持する。復帰までが半回転を超えた場合は
+        周回方向を一意に決められないため、基準をリセットしてその区間を積分しない。
+        """
+        if self.bus is None or self.last_encoder_positions is None:
+            return None
+        try:
+            positions_by_id = self.bus.read_positions()
+        except StsBusError as exc:
+            self.encoder_read_failures += 1
+            self.get_logger().warn(
+                f"位置エンコーダ読み取り失敗 ({self.encoder_read_failures}回): {exc}",
+                throttle_duration_sec=1.0,
+            )
+            return None
+
+        positions = np.asarray(
+            [positions_by_id[motor_id] for motor_id in self.motor_ids], dtype=float
+        )
+        dt = (now - self.last_encoder_time).nanoseconds * 1e-9
+        deltas = kin.encoder_position_deltas(positions, self.last_encoder_positions)
+        self.last_encoder_positions = positions
+        self.last_encoder_time = now
+        self.encoder_read_failures = 0
+
+        max_unambiguous_dt = kin.TICKS_PER_REV / (2.0 * max(1, self.max_ticks))
+        if dt <= 0.0 or dt >= max_unambiguous_dt:
+            self.get_logger().warn(
+                f"encoder dt={dt:.3f}s では周回方向を保証できないため積分をスキップ",
+                throttle_duration_sec=1.0,
+            )
+            return None
+        return deltas / dt, dt, deltas
 
     def safe_stop(self) -> None:
         """ゼロ送信 → トルク OFF。終了時に必ず呼ぶ。"""
@@ -247,6 +322,8 @@ class LekiwiBaseDriver(Node):
         try:
             accel = int(self.get_parameter("servo_acceleration").value)
             self.bus.recover(accel if accel >= 0 else None)
+            if self.use_encoder_odometry:
+                self._reset_encoder_baseline()
             response.success = True
             response.message = "過負荷ラッチを解除し速度モードを再設定しました"
         except StsBusError as exc:
@@ -312,17 +389,30 @@ class LekiwiBaseDriver(Node):
             except StsBusError as exc:
                 self.get_logger().error(f"速度指令の送信失敗: {exc}", throttle_duration_sec=1.0)
 
-        # 実際に送った tick から本当の指令速度を逆算する。
-        # 飽和による縮小も整数丸めもここに含まれる。
+        motion_ticks = np.asarray(ticks, dtype=float)
+        integration_dt = dt if bridge_ready else 0.0
+        encoder_deltas = None
+        if self._encoder_odometry_active:
+            sample = self._read_encoder_motion(now)
+            if sample is None:
+                motion_ticks = np.zeros(3)
+                integration_dt = 0.0
+            else:
+                motion_ticks, integration_dt, encoder_deltas = sample
+
+        # serial 実機ではエンコーダ実測、その他では実際に送った指令 tick から
+        # 車体速度を逆算する。
         act_vx, act_vy, act_wz_degps = kin.wheel_ticks_to_body(
-            ticks, self.m_inv, self.wheel_radius, direction_signs=self.direction_signs
+            motion_ticks, self.m_inv, self.wheel_radius, direction_signs=self.direction_signs
         )
         act_wz = math.radians(act_wz_degps)
 
-        integration_dt = dt if bridge_ready else 0.0
         self._integrate_odometry(act_vx, act_vy, act_wz, integration_dt)
-        self._integrate_wheels(ticks, integration_dt)
-        self._publish(now, act_vx, act_vy, act_wz, ticks)
+        if encoder_deltas is None:
+            self._integrate_wheels(motion_ticks, integration_dt)
+        else:
+            self._integrate_wheel_deltas(encoder_deltas)
+        self._publish(now, act_vx, act_vy, act_wz, motion_ticks)
 
     def _publish_wheel_command(self, ticks) -> None:
         if self.wheel_command_pub is None:
@@ -360,6 +450,12 @@ class LekiwiBaseDriver(Node):
         for i, tick in enumerate(ticks):
             self.wheel_positions[i] += kin.ticks_to_radps(tick, self.direction_signs[i]) * dt
 
+    def _integrate_wheel_deltas(self, deltas) -> None:
+        for i, delta in enumerate(deltas):
+            self.wheel_positions[i] += (
+                float(delta) / kin.TICKS_PER_REV * 2.0 * math.pi * self.direction_signs[i]
+            )
+
     def _publish(self, now, vx: float, vy: float, wz: float, ticks) -> None:
         stamp = now.to_msg()
 
@@ -373,7 +469,7 @@ class LekiwiBaseDriver(Node):
         odom.twist.twist.linear.x = vx
         odom.twist.twist.linear.y = vy
         odom.twist.twist.angular.z = wz
-        # オープンループなので信頼度は低い。SLAM 側に「信用するな」と伝える
+        # エンコーダでも車輪スリップは見えないため、SLAM より低い信頼度にする。
         odom.pose.covariance[0] = 0.1
         odom.pose.covariance[7] = 0.1
         odom.pose.covariance[35] = 0.2

@@ -36,7 +36,7 @@ TORQUE_ENABLE = (40, 1)
 ACCELERATION = (41, 1)
 GOAL_VELOCITY = (46, 2)  # sign-magnitude, 符号ビット 15
 LOCK = (55, 1)  # EEPROM ロック. 0=解錠, 1=施錠
-PRESENT_POSITION = (56, 2)  # sign-magnitude, 符号ビット 15
+PRESENT_POSITION = (56, 2)  # 0..4095、1回転で周回
 PRESENT_VELOCITY = (58, 2)  # sign-magnitude, 符号ビット 15
 PRESENT_LOAD = (60, 2)  # sign-magnitude, 符号ビット 10 (15 ではない)
 PRESENT_VOLTAGE = (62, 1)  # 単位 0.1V
@@ -44,6 +44,7 @@ PRESENT_TEMPERATURE = (63, 1)  # 単位 °C
 
 VELOCITY_MODE = 1
 STS3215_MODEL_NUMBER = 777
+POSITION_COUNTS_PER_REV = 4096
 
 SIGN_BIT_VELOCITY = 15
 SIGN_BIT_LOAD = 10
@@ -110,6 +111,7 @@ class StsBus:
         self._port = None
         self._packet = None
         self._sync_writer = None
+        self._sync_position_reader = None
 
     # ── 接続 ───────────────────────────────────────────────────────────
 
@@ -134,6 +136,13 @@ class StsBus:
         self._port = port
         self._packet = packet
         self._sync_writer = scs.GroupSyncWrite(port, packet, GOAL_VELOCITY[0], GOAL_VELOCITY[1])
+        self._sync_position_reader = scs.GroupSyncRead(
+            port, packet, PRESENT_POSITION[0], PRESENT_POSITION[1]
+        )
+        for motor_id in self.ids:
+            if not self._sync_position_reader.addParam(motor_id):
+                self.close()
+                raise StsBusError(f"ID {motor_id} を位置同期読み取りへ登録できない")
 
     def close(self) -> None:
         if self._port is not None:
@@ -141,6 +150,7 @@ class StsBus:
         self._port = None
         self._packet = None
         self._sync_writer = None
+        self._sync_position_reader = None
 
     def _assert_connected(self) -> None:
         if self._port is None:
@@ -301,6 +311,36 @@ class StsBus:
             motor_id: decode_sign_magnitude(self._read(PRESENT_VELOCITY, motor_id), SIGN_BIT_VELOCITY)
             for motor_id in self.ids
         }
+
+    def read_positions(self) -> dict[int, int]:
+        """全モータの位置エンコーダ値を 1 回の同期要求で読む。
+
+        STS3215 の ``Present_Position`` は 1 回転 4096 count で周回する。
+        速度レジスタは停止中にも小さな非ゼロ値を返す個体があるため、制御周期の
+        オドメトリにはこちらの位置差分を使う。
+        """
+        self._assert_connected()
+        if self._sync_position_reader is None:
+            raise StsBusError("位置同期読み取りが初期化されていない")
+
+        result = None
+        for _ in range(1 + self.num_retry):
+            result = self._sync_position_reader.txRxPacket()
+            if result == scs.COMM_SUCCESS:
+                return {
+                    motor_id: int(
+                        self._sync_position_reader.getData(
+                            motor_id, PRESENT_POSITION[0], PRESENT_POSITION[1]
+                        )
+                    )
+                    % POSITION_COUNTS_PER_REV
+                    for motor_id in self.ids
+                }
+
+        raise StsBusError(
+            "位置エンコーダの同期読み取り失敗: "
+            f"{self._packet.getTxRxResult(result)}"
+        )
 
 
 def main() -> None:
