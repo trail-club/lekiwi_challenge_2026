@@ -121,3 +121,12 @@ def encoder_position_deltas(current, previous) -> np.ndarray:
 def ticks_to_radps(ticks: float, direction_sign: float = 1.0) -> float:
     """生の速度値 → 車輪の角速度 [rad/s] (``/joint_states`` 用)。"""
     return np.radians(ticks / STEPS_PER_DEG) * direction_sign
+
+
+def position_counts_to_rad(counts: float, direction_sign: float = 1.0) -> float:
+    """位置カウント差 → 車輪の回転角 [rad] (``/joint_states`` 用)。
+
+    ``ticks_to_radps`` と同じ符号規約。1 秒間 ``n`` ticks/s で回った量と
+    ``n`` カウントの位置差は同じ角度になる。
+    """
+    return float(counts) / TICKS_PER_REV * 2.0 * np.pi * direction_sign

@@ -36,6 +36,7 @@ from std_srvs.srv import Trigger
 from tf2_ros import TransformBroadcaster
 
 from lekiwi_base_bringup import kinematics as kin
+from lekiwi_base_bringup.encoder_odometry import EncoderTracker
 from lekiwi_base_bringup.sts_bus import STS3215_MODEL_NUMBER, StsBus, StsBusError
 
 #: 車輪の順序。行列の行順・パラメータ配列の順序すべてこれに従う
@@ -123,9 +124,7 @@ class LekiwiBaseDriver(Node):
         self.odom_yaw = 0.0
         self.wheel_positions = np.zeros(3)  # 車輪の積算回転角 [rad]
         self.last_tick_time = self.get_clock().now()
-        self.last_encoder_time = self.get_clock().now()
-        self.last_encoder_positions: np.ndarray | None = None
-        self.encoder_read_failures = 0
+        self.encoder = EncoderTracker()
         self.bus: StsBus | None = None
         self.wheel_command_pub = None
         self._warned_stale = False
@@ -227,7 +226,9 @@ class LekiwiBaseDriver(Node):
         if self.use_encoder_odometry:
             self._reset_encoder_baseline()
         self.bus.configure_velocity_mode(accel if accel >= 0 else None)
-        self.last_encoder_time = self.get_clock().now()
+        # 設定中は車輪が回らないので、基準位置は保ったまま時刻だけ進める。
+        # そうしないと初回周期で欠測扱いになり停止ログが出る。
+        self.encoder.restamp(self._now_s())
         self.get_logger().info("速度モード設定完了、トルク ON")
 
     @property
@@ -239,52 +240,47 @@ class LekiwiBaseDriver(Node):
             and self.bus is not None
         )
 
+    def _now_s(self) -> float:
+        return self.get_clock().now().nanoseconds * 1e-9
+
+    def _read_positions(self) -> list[int]:
+        positions = self.bus.read_positions()
+        return [positions[motor_id] for motor_id in self.motor_ids]
+
     def _reset_encoder_baseline(self) -> None:
         if self.bus is None:
-            self.last_encoder_positions = None
+            self.encoder = EncoderTracker()
             return
-        positions = self.bus.read_positions()
-        self.last_encoder_positions = np.asarray(
-            [positions[motor_id] for motor_id in self.motor_ids], dtype=float
-        )
-        self.last_encoder_time = self.get_clock().now()
-        self.encoder_read_failures = 0
+        self.encoder.reset(self._read_positions(), self._now_s())
 
-    def _read_encoder_motion(self, now):
-        """位置差分から ``(ticks/s, dt, delta_counts)`` を返す。
+    def _read_encoder_motion(self, now, max_abs_ticks: float):
+        """位置差分から ``(ticks/s, dt, delta_counts)`` を返す。積分しない区間は ``None``。
 
-        読み取り失敗時は基準値を保持する。復帰までが半回転を超えた場合は
-        周回方向を一意に決められないため、基準をリセットしてその区間を積分しない。
+        読み取り失敗時は基準値を保持する。復帰までの間隔が長すぎて周回方向を
+        一意に決められない場合は、基準を置き直してその区間を積分しない。
         """
-        if self.bus is None or self.last_encoder_positions is None:
+        if self.bus is None or self.encoder.positions is None:
             return None
         try:
-            positions_by_id = self.bus.read_positions()
+            positions = self._read_positions()
         except StsBusError as exc:
-            self.encoder_read_failures += 1
+            failures = self.encoder.record_failure()
             self.get_logger().warn(
-                f"位置エンコーダ読み取り失敗 ({self.encoder_read_failures}回): {exc}",
+                f"位置エンコーダ読み取り失敗 ({failures}回): {exc}",
                 throttle_duration_sec=1.0,
             )
             return None
 
-        positions = np.asarray(
-            [positions_by_id[motor_id] for motor_id in self.motor_ids], dtype=float
-        )
-        dt = (now - self.last_encoder_time).nanoseconds * 1e-9
-        deltas = kin.encoder_position_deltas(positions, self.last_encoder_positions)
-        self.last_encoder_positions = positions
-        self.last_encoder_time = now
-        self.encoder_read_failures = 0
-
-        max_unambiguous_dt = kin.TICKS_PER_REV / (2.0 * max(1, self.max_ticks))
-        if dt <= 0.0 or dt >= max_unambiguous_dt:
+        sample = self.encoder.update(positions, now.nanoseconds * 1e-9, max_abs_ticks)
+        if sample is None:
+            return None
+        if not sample.integrable:
             self.get_logger().warn(
-                f"encoder dt={dt:.3f}s では周回方向を保証できないため積分をスキップ",
+                f"encoder dt={sample.dt:.3f}s では周回方向を保証できないため積分をスキップ",
                 throttle_duration_sec=1.0,
             )
             return None
-        return deltas / dt, dt, deltas
+        return sample.ticks_per_s, sample.dt, sample.deltas
 
     def safe_stop(self) -> None:
         """ゼロ送信 → トルク OFF。終了時に必ず呼ぶ。"""
@@ -374,6 +370,23 @@ class LekiwiBaseDriver(Node):
                 direction_signs=self.direction_signs,
             )
 
+        # 周回方向の判定に使う最高速度。診断モードの生 tick は max_ticks で
+        # 縮小されないので、それも含めた大きい方を使う。
+        max_abs_ticks = max([self.max_ticks, *(abs(int(t)) for t in test_ticks[:3])])
+
+        # ★ エンコーダが読めない間に走り続けると、/odom が止まったまま Nav2 が
+        #   指令を押し続ける。cmd_vel のウォッチドッグと同じ時間で車輪を止める。
+        if self._encoder_odometry_active and self.encoder.is_stale(
+            now.nanoseconds * 1e-9, self.cmd_vel_timeout_s
+        ):
+            if any(ticks):
+                self.get_logger().error(
+                    "位置エンコーダの欠測が "
+                    f"{self.cmd_vel_timeout_s:.2f}s を超えたため車輪を停止します",
+                    throttle_duration_sec=1.0,
+                )
+            ticks = [0, 0, 0]
+
         bridge_ready = True
         if self.hardware_backend == "bridge":
             bridge_ready = bool(
@@ -393,7 +406,7 @@ class LekiwiBaseDriver(Node):
         integration_dt = dt if bridge_ready else 0.0
         encoder_deltas = None
         if self._encoder_odometry_active:
-            sample = self._read_encoder_motion(now)
+            sample = self._read_encoder_motion(now, max_abs_ticks)
             if sample is None:
                 motion_ticks = np.zeros(3)
                 integration_dt = 0.0
@@ -452,9 +465,7 @@ class LekiwiBaseDriver(Node):
 
     def _integrate_wheel_deltas(self, deltas) -> None:
         for i, delta in enumerate(deltas):
-            self.wheel_positions[i] += (
-                float(delta) / kin.TICKS_PER_REV * 2.0 * math.pi * self.direction_signs[i]
-            )
+            self.wheel_positions[i] += kin.position_counts_to_rad(delta, self.direction_signs[i])
 
     def _publish(self, now, vx: float, vy: float, wz: float, ticks) -> None:
         stamp = now.to_msg()
