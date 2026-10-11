@@ -105,6 +105,20 @@ SO101_DEVICE   ?=
 RPLIDAR_DEVICE ?=
 MAP_DIR        ?= $(HOME)/maps
 export LEKIWI_DEVICE SO101_DEVICE RPLIDAR_DEVICE MAP_DIR
+
+# ★ リモートデスクトップ (xrdp) は Xorg を `-auth ~/.Xauthority` で起動するが、
+#   セッションに XAUTHORITY を export しない。ホストのアプリは既定で
+#   ~/.Xauthority を読むので動くが、compose は `${XAUTHORITY:-/tmp/.Xauthority}`
+#   を mount する。/tmp/.Xauthority は無いので Docker が空ディレクトリを作り、
+#   RViz はクッキー無しで弾かれる (物理画面では GDM が XAUTHORITY を設定するので動く)。
+#   compose 側の既定値を ~/.Xauthority にしないのは、ファイルが無いときに
+#   Docker がホームに root 所有のディレクトリを作り、次の RDP ログインを壊すため。
+ifeq ($(XAUTHORITY),)
+  ifneq ($(wildcard $(HOME)/.Xauthority),)
+    XAUTHORITY := $(HOME)/.Xauthority
+    export XAUTHORITY
+  endif
+endif
 ifneq ($(ROBOT),)
   export ROBOT_CONTAINER COMPOSE_PROJECT_NAME
   ifneq ($(ROS_DOMAIN_ID_$(ROBOT)),)
