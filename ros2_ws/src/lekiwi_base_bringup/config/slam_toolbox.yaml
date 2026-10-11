@@ -1,8 +1,8 @@
 # slam_toolbox (async / mapping モード) の設定。
 #
 # 役割は Nav2 が要求する **map → odom の TF** と /map を出すこと。
-# base_driver のオドメトリはオープンループ (指令値の積分) でスリップも外乱も
-# 検出しないため、自己位置の責任は実質すべてここにある。
+# base_driver は3輪の位置エンコーダからオドメトリを生成するが、車輪の空転や
+# オムニローラーの横滑りは検出できない。この層で LiDAR 観測を使って補正する。
 #
 # 値は slam_toolbox 同梱の mapper_params_online_async.yaml を土台に、
 # この機体 (最大 0.26 m/s、外接半径 約 0.15 m、想定は屋内の小部屋) に合わせて

@@ -334,7 +334,7 @@ ros2 action send_goal -f /joint_trajectory_controller/follow_joint_trajectory \
 | `/navigate_to_pose` | **Action** | ナビの本筋。**結果とフィードバックが得られる** |
 | `/compute_path_to_pose` | **Action** | 経路計画だけ（走らない）。到達可能かの確認 |
 | `/cmd_vel` | Topic `Twist` | 速度指令。★ **安全機構より下流**（下記） |
-| `/odom` | Topic `Odometry` | 自己位置。★ **指令値の積分**で実測ではない |
+| `/odom` | Topic `Odometry` | 自己位置。serial 実機は3輪の位置エンコーダ実測（スリップは検出不可） |
 | `/map` | Topic `OccupancyGrid` | SLAM が作った地図 |
 | `/plan` `/optimal_trajectory` | Topic `Path` | 大域経路 / 局所軌道。★ 他構成でよくある `/local_plan` は**存在しません** |
 | `/lekiwi_base_driver/recover` | **Service** | 過負荷ラッチ解除 + 速度モード再設定 |

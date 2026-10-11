@@ -327,6 +327,25 @@ def test_ticks_to_radps(sign) -> None:
     assert kin.ticks_to_radps(0, sign) == 0.0
 
 
+def test_encoder_position_deltas_without_wrap() -> None:
+    np.testing.assert_array_equal(
+        kin.encoder_position_deltas([110, 190, 320], [100, 200, 300]),
+        [10, -10, 20],
+    )
+
+
+def test_encoder_position_deltas_across_wrap() -> None:
+    np.testing.assert_array_equal(
+        kin.encoder_position_deltas([5, 4090], [4090, 5]),
+        [11, -11],
+    )
+
+
+def test_encoder_position_deltas_rejects_shape_mismatch() -> None:
+    with pytest.raises(ValueError, match="形が異なる"):
+        kin.encoder_position_deltas([1, 2, 3], [1, 2])
+
+
 # ── 「横移動を指令したのに旋回する」の切り分け ──────────────────────────
 #
 # 「横移動を指令したのに旋回した」ときに**どのノブを疑えばよいか**を固定する。
