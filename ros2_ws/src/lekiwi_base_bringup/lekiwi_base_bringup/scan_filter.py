@@ -48,7 +48,7 @@ class ScanFilter(Node):
         super().__init__("scan_angular_filter")
 
         # 右後ろ・前方・左後ろ [deg]
-        self.declare_parameter("valid_ranges_deg", [-170.0, -70.0, -50.0, 50.0, 70.0, 170.0])
+        self.declare_parameter("valid_ranges_deg", [-154.9, -140.9, -57.7, 93.8, 158.9, 171.0])
         self.declare_parameter("max_interp_gap", 2)
 
         flat = [float(v) for v in self.get_parameter("valid_ranges_deg").value]

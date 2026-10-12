@@ -5,6 +5,11 @@
 本スクリプトでは、機体が映らない角度を実測する。具体的には白い壁でlekiwiを囲った状態で
 100回計測して90回以上計測不能/距離が0.2メートル以下だった点は機体が映っているとみなす。
 
+ただし 1 回の計測の中で、計測不能 (inf / nan) が max_gap 点以下しか続かず、その両隣が
+どちらも有効な点 (計測できていて blocked_distance より遠い) なら、その欠損は
+偶発的なノイズとみなして有効な点として扱う。見える区間が欠損で細切れにならないようにするため。
+この補正は 1 回の計測ごとに行い、そのあとで回数を集計する。
+
 /scan を num_scans 回受け取ったら、機体が映らない区間のうち長い順に 3 つを
 右後ろ・前方・左後ろとしてログに出し、終了する。角度は正面が 0、左回りが正。
 
@@ -17,6 +22,7 @@
     num_scans (int, 既定 100): 計測回数
     blocked_ratio (float, 既定 0.9): この割合以上 計測不能/近距離 なら機体とみなす
     blocked_distance (float, 既定 0.2): これ以下の距離は機体とみなす [m]
+    max_gap (int, 既定 2): 両隣が有効なら有効とみなす、計測不能の最大連続点数
 
 ★ 角度は受信メッセージの angle_min / angle_increment ではなくパラメータから計算する。
   既定値は lidar_example.yaml (実機の /scan) の値。
@@ -39,6 +45,58 @@ _LABELS = ("右後ろ", "前方", "左後ろ")
 def is_blocked(r: float, blocked_distance: float) -> bool:
     """計測不能 (inf / nan) か、近すぎる点なら True。"""
     return not math.isfinite(r) or r <= blocked_distance
+
+
+def fill_short_gaps(
+    ranges: list[float], blocked_distance: float, max_gap: int, circular: bool
+) -> list[bool]:
+    """1 回の計測の blocked 判定を返す。短い欠損は有効な点として扱う。
+
+    欠損 = 計測不能 (inf / nan)。連続する欠損が max_gap 点以下で、その両隣が
+    どちらも有効 (計測できていて blocked_distance より遠い) なら、欠損も有効にする。
+    両隣のどちらかが近距離の点 (機体) なら、機体に挟まれた欠損なので埋めない。
+    circular なら先頭と末尾を隣同士として扱う。そうでなければ端の欠損は隣が
+    無いので埋めない。
+    """
+    n = len(ranges)
+    missing = [not math.isfinite(r) for r in ranges]
+    blocked = [is_blocked(r, blocked_distance) for r in ranges]
+    # 全点が欠損だと「両隣」が存在しないので、何も埋めずに返す
+    if n == 0 or all(missing):
+        return blocked
+
+    # 走査順。circular なら欠損でない点の直後から一周する。こうすると
+    # 末尾と先頭にまたがる欠損も、配列の途中の欠損と同じ 1 つの連続として扱える。
+    if circular:
+        anchor = missing.index(False)
+        order = [(anchor + 1 + k) % n for k in range(n)]
+    else:
+        order = list(range(n))
+
+    pos = 0
+    while pos < n:
+        if not missing[order[pos]]:
+            pos += 1
+            continue
+        end = pos
+        while end + 1 < n and missing[order[end + 1]]:
+            end += 1
+
+        # 範囲の外 (配列の端) は隣が無い。circular では order の末尾が anchor
+        # (欠損でない点) なので、pos == 0 のときの左隣は anchor、end の右隣は必ず存在する
+        left = order[pos - 1] if pos > 0 else (order[-1] if circular else None)
+        right = order[end + 1] if end + 1 < n else None
+        if (
+            end - pos + 1 <= max_gap
+            and left is not None
+            and right is not None
+            and not blocked[left]
+            and not blocked[right]
+        ):
+            for k in range(pos, end + 1):
+                blocked[order[k]] = False
+        pos = end + 1
+    return blocked
 
 
 def find_visible_intervals(blocked: list[bool], circular: bool) -> list[tuple[int, int]]:
@@ -74,9 +132,10 @@ class LidarAngle(Node):
         self.declare_parameter("angle_min", -3.1415927410125732)
         self.declare_parameter("angle_max", 3.1415927410125732)
         self.declare_parameter("angle_increment", 0.017501909285783768)
-        self.declare_parameter("num_scans", 100)
-        self.declare_parameter("blocked_ratio", 0.9)
+        self.declare_parameter("num_scans", 300)
+        self.declare_parameter("blocked_ratio", 0.7)
         self.declare_parameter("blocked_distance", 0.2)
+        self.declare_parameter("max_gap", 2)
 
         self._angle_min = float(self.get_parameter("angle_min").value)
         angle_max = float(self.get_parameter("angle_max").value)
@@ -84,6 +143,7 @@ class LidarAngle(Node):
         self._num_scans = int(self.get_parameter("num_scans").value)
         self._blocked_count = int(self._num_scans * float(self.get_parameter("blocked_ratio").value))
         self._blocked_distance = float(self.get_parameter("blocked_distance").value)
+        self._max_gap = int(self.get_parameter("max_gap").value)
 
         # 両端を含むので +1。lidar_example.yaml では 2π / 0.0175 + 1 = 360 点
         self._n_points = round((angle_max - self._angle_min) / self._inc) + 1
@@ -102,7 +162,8 @@ class LidarAngle(Node):
 
         self.get_logger().info(
             f"計測開始: {self._num_scans} 回 / {self._n_points} 点, "
-            f"{self._blocked_count} 回以上 計測不能 or {self._blocked_distance} m 以下 → 機体"
+            f"{self._blocked_count} 回以上 計測不能 or {self._blocked_distance} m 以下 → 機体 "
+            f"(両隣が有効な {self._max_gap} 点以下の欠損は有効扱い)"
         )
 
     def _cb(self, msg: LaserScan) -> None:
@@ -116,8 +177,12 @@ class LidarAngle(Node):
             )
             return
 
-        for i, r in enumerate(msg.ranges):
-            if is_blocked(r, self._blocked_distance):
+        # 短い欠損は 1 回の計測ごとに埋めてから数える
+        blocked = fill_short_gaps(
+            list(msg.ranges), self._blocked_distance, self._max_gap, self._circular
+        )
+        for i, b in enumerate(blocked):
+            if b:
                 self._counts[i] += 1
         self._received += 1
 
