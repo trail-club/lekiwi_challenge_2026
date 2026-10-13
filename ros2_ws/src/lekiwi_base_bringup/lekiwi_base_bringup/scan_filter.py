@@ -1,19 +1,28 @@
-"""スキャンデータを角度範囲でフィルタリングする。
+"""スキャンデータを角度範囲でフィルタリングし、短い欠損を補完する。
 
-右車輪(−60°)から左車輪(+60°)の間、すなわちロボット前方 120° アークのみを
-有効とし、それ以外の角度の測距値を inf(障害物なし)に置き換えて /scan_filtered
-に転送する。
+LeKiwi の車輪は 3 つ (左 +60°、後ろ 180°、右 −60°) なので、機体が映らない
+のは 右後ろ・前方・左後ろ の 3 区間になる。この 3 区間だけを有効とし、それ以外の
+角度の測距値を inf(障害物なし)に置き換えて /scan_filtered に転送する。
+区間は lidar_angle で実測した値を入れる。
+
+そのあと、欠損 (inf / nan) が max_interp_gap ビーム以下で、両隣に有効な値が
+あるときは線形補完する。マスクした点は補完せず、隣としても使わないので、
+機体の点や区間の外をまたいで補完することは無い。
 
 Nav2 のコストマップ・collision_monitor・AMCL・slam_toolbox がこのトピックを
-購読することで、後方の車輪・ボディが誤って障害物としてマーキングされるのを防ぐ。
+購読することで、車輪・ボディが誤って障害物としてマーキングされるのを防ぐ。
 
 ★ SLAM もこちらを使う (slam_toolbox.yaml の scan_topic)。地図に自機が
   焼き付くのを避けるため。地図とそれを突き合わせる AMCL (nav2.yaml の
   amcl.scan_topic) も同じトピックにしてある。
 
 パラメータ:
-    angle_min_deg (float, 既定 -60.0): 有効範囲の下限 [deg]
-    angle_max_deg (float, 既定  60.0): 有効範囲の上限 [deg]
+    valid_ranges_deg (float[], 既定 [-170, -70, -50, 50, 70, 170]):
+        有効区間 [deg] を [min1, max1, min2, max2, min3, max3] の平たい配列で
+        指定する (右後ろ・前方・左後ろ)。両端を含む。min > max の区間は ±180°
+        をまたぐとみなす。★ 既定値は車輪の方位から 10° ずつ余裕を取った仮の値。
+        lidar_angle の出力で置き換えること。
+    max_interp_gap (int, 既定 2): この本数以下の連続した欠損を補完する。0 で無効
 """
 
 from __future__ import annotations
@@ -27,16 +36,24 @@ from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import LaserScan
 
+from lekiwi_base_bringup.scan_preprocess import (
+    interpolate_short_gaps,
+    mask_outside_intervals,
+    parse_intervals_deg,
+)
+
 
 class ScanFilter(Node):
     def __init__(self) -> None:
         super().__init__("scan_angular_filter")
 
-        self.declare_parameter("angle_min_deg", -60.0)
-        self.declare_parameter("angle_max_deg", 60.0)
+        # 右後ろ・前方・左後ろ [deg]
+        self.declare_parameter("valid_ranges_deg", [-154.9, -140.9, -57.7, 93.8, 158.9, 171.0])
+        self.declare_parameter("max_interp_gap", 2)
 
-        self._a_min = math.radians(self.get_parameter("angle_min_deg").value)
-        self._a_max = math.radians(self.get_parameter("angle_max_deg").value)
+        flat = [float(v) for v in self.get_parameter("valid_ranges_deg").value]
+        self._intervals = parse_intervals_deg(flat)
+        self._max_gap = int(self.get_parameter("max_interp_gap").value)
 
         # ★ 購読は BEST_EFFORT (qos_profile_sensor_data) にすること。
         #   depth=10 の既定は RELIABLE で、BEST_EFFORT の publisher からは
@@ -55,8 +72,12 @@ class ScanFilter(Node):
         )
         self._pub = self.create_publisher(LaserScan, "scan_filtered", 10)
 
+        ranges_str = ", ".join(
+            f"{math.degrees(lo):.1f}° 〜 {math.degrees(hi):.1f}°" for lo, hi in self._intervals
+        )
         self.get_logger().info(
-            f"スキャンフィルター起動: 有効範囲 {math.degrees(self._a_min):.1f}° 〜 {math.degrees(self._a_max):.1f}°"
+            f"スキャンフィルター起動: 有効範囲 [{ranges_str}], "
+            f"補完 {self._max_gap} ビーム以下"
         )
 
     def _cb(self, msg: LaserScan) -> None:
@@ -65,12 +86,10 @@ class ScanFilter(Node):
         if msg.intensities:
             out.intensities = list(msg.intensities)
 
-        for i in range(len(out.ranges)):
-            angle = msg.angle_min + i * msg.angle_increment
-            # -π 〜 π に正規化
-            angle = (angle + math.pi) % (2.0 * math.pi) - math.pi
-            if angle < self._a_min or angle > self._a_max:
-                out.ranges[i] = float("inf")
+        inside = mask_outside_intervals(
+            out.ranges, msg.angle_min, msg.angle_increment, self._intervals
+        )
+        interpolate_short_gaps(out.ranges, self._max_gap, msg.range_min, msg.range_max, inside)
 
         self._pub.publish(out)
 
