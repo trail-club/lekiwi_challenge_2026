@@ -21,9 +21,11 @@ slam_toolbox:
     # ── フレームとトピック ──────────────────────────────────────────
     odom_frame: odom
     map_frame: map
+
     # ★ base_driver の child_frame_id と揃える (base.yaml の base_frame)。
     #   ここがずれると TF ツリーが二股に分かれて Nav2 が自己位置を失う。
     base_frame: base_footprint
+
     # ★ /scan_filtered を使う。後方車輪(180°)やボディが /scan に映ると地図に幻の壁が
     #   焼き付くため、前方 120°(-60°〜+60°)に絞ったフィルタ済みスキャンを使う。
     scan_topic: /scan_filtered
@@ -59,10 +61,10 @@ slam_toolbox:
     link_scan_maximum_distance: 1.5
     loop_search_maximum_distance: 3.0
     do_loop_closing: true
-    loop_match_minimum_chain_size: 10
+    loop_match_minimum_chain_size: 5
     loop_match_maximum_variance_coarse: 3.0
-    loop_match_minimum_response_coarse: 0.35
-    loop_match_minimum_response_fine: 0.45
+    loop_match_minimum_response_coarse: 0.25
+    loop_match_minimum_response_fine: 0.35
 
     # ── 相関 ────────────────────────────────────────────────────────
     correlation_search_space_dimension: 0.5
