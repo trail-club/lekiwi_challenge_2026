@@ -113,45 +113,52 @@ ros2 topic pub --once /goal_pose geometry_msgs/msg/PoseStamped \
 `nav.launch.py` を**走らせたまま別のシェルで**。
 
 ```bash
-ros2 run lekiwi_base_bringup save_map            # → /maps/my_room.yaml と .pgm
-ros2 run lekiwi_base_bringup save_map living     # → /maps/living.yaml
+ros2 run lekiwi_base_bringup save_map            # → /maps/my_room.{posegraph,data,yaml,pgm}
+ros2 run lekiwi_base_bringup save_map living     # → /maps/living.*
 ros2 run lekiwi_base_bringup save_map /tmp/test  # / で始めれば絶対パス
 ```
 
 | | パス |
 | --- | --- |
-| コンテナ内 | `/maps/<名前>.yaml` と `.pgm` |
-| ホスト | `$MAP_DIR/<名前>.yaml`（既定 `~/maps`） |
+| コンテナ内 | `/maps/<名前>.posegraph` / `.data` / `.yaml` / `.pgm` |
+| ホスト | `$MAP_DIR/<名前>.*`（既定 `~/maps`） |
 
-★ 保存できるのは `nav.launch.py`（SLAM）の間だけ。`/map_saver/save_map` を出して
-いるのはこの launch が起動する `map_saver_server` で、`nav_with_map.launch.py`
-（AMCL）側には無い。
+| ファイル | 書くもの | 使い道 |
+| --- | --- | --- |
+| `.posegraph` / `.data` | slam_toolbox（`/slam_toolbox/serialize_map`） | **7. で読む地図の本体** |
+| `.yaml` / `.pgm` | map_saver（`/map_saver/save_map`） | 画像として確認する用 |
+
+★ `.pgm` からは `.posegraph` を作れない。7. で使う地図は必ず `save_map` で保存する。
+
+★ 保存できるのは `nav.launch.py`（SLAM）の間だけ。`nav_with_map.launch.py`
+（localization）の slam_toolbox は保存を受け付けず、`map_saver_server` も起動しない。
 
 ---
 
-## 7. 保存地図で走る（AMCL）
+## 7. 保存地図で走る（slam_toolbox localization）
 
 ```bash
-ros2 launch lekiwi_base_bringup nav_with_map.launch.py map_file:=/maps/my_room.yaml
+ros2 launch lekiwi_base_bringup nav_with_map.launch.py map_file:=/maps/my_room
 ```
 
-`map_file` は**必須引数**。忘れると launch が即座に拒否する。
+`map_file` は**必須引数**。忘れたとき、`<名前>.posegraph` / `.data` が無いときは
+launch が起動前に拒否する。拡張子（`.yaml` / `.posegraph`）は付けても付けなくてもよい。
 
-起動後、**RViz の "2D Pose Estimate" で初期姿勢を与える**。
+slam_toolbox は起動時に `initial_pose_x` / `initial_pose_y` / `initial_pose_yaw`
+（既定 0, 0, 0 = 地図を作り始めた位置と向き）の付近で地図と突き合わせる。
+**地図を作り始めた位置に置いて起動すれば、初期姿勢の指定は要らない。**
+別の位置から始めるときは、引数で渡すか RViz の "2D Pose Estimate" で与える。
 
-★ AMCL は `update_min_d: 0.25` m / `update_min_a: 0.2` rad 動くまで更新しない。
-**止まっている間は `map → odom` が 1 ミリも動かないのが正常。** ズレたまま
-走らせても直らない（`recovery_alpha_*` が 0 で大域再測位は無効）ので、
-大きく外れたら 2D Pose Estimate を打ち直す。
+★ slam_toolbox は `minimum_travel_distance: 0.1` m / `minimum_travel_heading: 0.1` rad
+（`slam_toolbox.yaml`）動くまでスキャンを取り込まない。
+**止まっている間は `map → odom` が動かないのが正常。**
+大きく外れたら 2D Pose Estimate を打ち直す。打ち直すと、次のスキャンを
+その付近で突き合わせ直す（止まったままでも 1 回は更新される）。
 
-止まったまま補正させたいときは、強制更新を叩く（1 回で 1 更新）。
+推定した自己位置は `/pose`（`PoseWithCovarianceStamped`）に出る。
 
-```bash
-ros2 service call /request_nomotion_update std_srvs/srv/Empty {}
-```
-
-★ 連打しないこと。同じスキャンを別々の観測として扱うので、粒子が潰れて
-**間違った姿勢に自信を持つ**。数回で直らなければ走らせるか打ち直す。
+★ `/map` は保存した地図に直近の数スキャンを重ねて出し直す。直近のスキャンは
+使い終わると捨てるので、保存した地図ファイルは変わらない。
 
 ---
 
@@ -211,7 +218,7 @@ make release BUS_MODE=base          # ホイールを止めてトルクを切る
 | マップの読み込み | `nav_with_map.launch.py` のオプション `map_file` を指定 |
 | TF `map → odom` | RViz で表示 |
 | `/initialpose` | RViz の "2D Pose Estimate" で初期位置を指定 |
-| `/request_nomotion_update` | `ros2 service call` を叩く |
+| `/pose` | `ros2 topic echo /pose` で推定位置を確認 |
 
 ### Navigation
 
@@ -258,6 +265,5 @@ make release BUS_MODE=base          # ホイールを止めてトルクを切る
 | コマンド | 内容 |
 | --- | --- |
 | `ros2 launch lekiwi_base_bringup nav.launch.py` | 起動（SLAM） |
-| `ros2 launch lekiwi_base_bringup nav_with_map.launch.py map_file:=...` | 起動（保存地図 + AMCL） |
+| `ros2 launch lekiwi_base_bringup nav_with_map.launch.py map_file:=...` | 起動（保存地図 + slam_toolbox localization） |
 | `ros2 run lekiwi_base_bringup save_map [名前]` | 地図の保存 |
-| `ros2 service call /request_nomotion_update std_srvs/srv/Empty {}` | AMCL を静止したまま 1 回更新 |

@@ -87,7 +87,7 @@ README (`README.md`) の 1〜5 章に従って、以下を`hsr-pc`のチーム�
 
 | ID | モジュール | 主機能 | ROS 2 インタフェース例 | 担当領域 |
 |---|---|---|---|---|
-| M1 | **Mapping / Localization** | 事前マップ作成、AMCL による自己位置推定 | `/map`, `/amcl_pose` | Navigation |
+| M1 | **Mapping / Localization** | 事前マップ作成、slam_toolbox（localization）による自己位置推定 | `/map`, `/pose` | Navigation |
 | M2 | **Navigation** | Nav2 スタックで指定座標へ移動 | Action `NavigateToPose` | Navigation |
 | M3 | **Exploration** | 未知位置オブジェクトの探索 (フロンティア or ウェイポイント) | Action `Explore` | Navigation |
 | M4 | **Perception** | RGB-D からのオブジェクト検出・位置推定 | Topic `/detected_objects` | Perception |

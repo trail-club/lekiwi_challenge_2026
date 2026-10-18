@@ -33,7 +33,7 @@ LiDAR / SLAM / Nav2 / SO-101 アーム / 手首カメラ（RealSense）を **1 �
 ## 構成
 
 ```
-        map (slam_toolbox / amcl)
+        map (slam_toolbox)
          └ odom (base_driver のオドメトリ積分)
             └ base_footprint → base_link
                                ├ laser_link      ← RPLIDAR
@@ -129,7 +129,7 @@ make shell        # docker compose exec -it robot bash
 | `sim` | `false` | `true` でシリアルも LiDAR も開かない（`base_driver` は dry_run、スキャンは `fake_scan`） |
 | `backend` | `mock` | `lerobot` で実機のアーム。`sim` とは独立 |
 | `robot_id` | （空） | `backend:=lerobot` では必須の LeRobot 較正 ID |
-| `use_saved_map` + `map_file` | `false` | `true` で slam_toolbox の代わりに map_server + AMCL |
+| `use_saved_map` + `map_file` | `false` | `true` で slam_toolbox を localization モードにし、保存地図（`<名前>.posegraph`）で自己位置推定 |
 | `start_base` / `start_camera` / `start_lidar` / `start_rviz` | `true` | 部分起動 |
 | `mock_wrist_camera_optical` | `false` | カメラ実機なしで光学フレームだけ出す（`sim` 用） |
 

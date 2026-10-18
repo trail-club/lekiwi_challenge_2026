@@ -2,10 +2,10 @@
 
     sim:=true                            -> sim_nav.launch.py       (dry_run + fake_scan)
     sim:=false かつ use_saved_map:=false -> nav.launch.py           (SLAM)
-    sim:=false かつ use_saved_map:=true  -> nav_with_map.launch.py  (AMCL)
+    sim:=false かつ use_saved_map:=true  -> nav_with_map.launch.py  (slam_toolbox localization)
 
-★ ここを間違えると「実機のはずが dry_run で走らない」「SLAM と AMCL が同時に
-  map->odom を出して TF が二重定義になる」といった、起動して初めて分かる壊れ方をする。
+★ ここを間違えると「実機のはずが dry_run で走らない」「SLAM と localization の
+  slam_toolbox が同時に map->odom を出して TF が二重定義になる」といった、起動して初めて分かる壊れ方をする。
   条件そのもの (AndSubstitution / NotSubstitution) を評価して確かめる。
 
 ★ ノードは 1 つも起動しない。LaunchContext に設定値を入れて条件式を評価するだけ。
@@ -31,11 +31,11 @@ START_CAMERA = LaunchConfiguration("start_camera")
 # robot.launch.py と同じ式。式を変えたらここも変えること。
 REAL = NotSubstitution(SIM)
 USE_SLAM = AndSubstitution(REAL, NotSubstitution(SAVED))
-USE_AMCL = AndSubstitution(REAL, SAVED)
+USE_LOCALIZATION = AndSubstitution(REAL, SAVED)
 
 BRANCHES = {
     "slam": AndSubstitution(START_BASE, USE_SLAM),
-    "amcl": AndSubstitution(START_BASE, USE_AMCL),
+    "localization": AndSubstitution(START_BASE, USE_LOCALIZATION),
     "sim": AndSubstitution(START_BASE, SIM),
 }
 
@@ -55,10 +55,10 @@ def _active_branches(**settings):
     ("sim", "use_saved_map", "expected"),
     [
         ("false", "false", {"slam"}),
-        ("false", "true", {"amcl"}),
+        ("false", "true", {"localization"}),
         ("true", "false", {"sim"}),
-        # ★ sim:=true が use_saved_map より強い。実機なし検証で AMCL を上げても
-        #   保存地図が無いので map_server が落ちるだけ。
+        # ★ sim:=true が use_saved_map より強い。実機なし検証で localization を上げても
+        #   保存地図が無いので launch が拒否するだけ。
         ("true", "true", {"sim"}),
     ],
 )

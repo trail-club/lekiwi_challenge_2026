@@ -164,7 +164,8 @@ Visualization Manager:
     - Class: rviz_default_plugins/FocusCamera
     - Class: rviz_default_plugins/Measure
       Line color: 128; 128; 0
-    # ★ amcl の初期姿勢。保存地図構成では必須（起動直後は自己位置が未確定）。
+    # ★ slam_toolbox (localization) の初期姿勢。保存地図構成で、地図を作り始めた
+    #   位置以外から起動したときに与える。
     - Class: rviz_default_plugins/SetInitialPose
       Topic:
         Value: /initialpose

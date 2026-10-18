@@ -42,7 +42,10 @@
   start_slam:=true のときは map_saver_server + 専用 lifecycle_manager を
   自動起動しているので、以下のどちらかで保存できる:
 
-    ros2 run lekiwi_base_bringup save_map [名前]   # /map_saver/save_map を呼ぶ
+    ros2 run lekiwi_base_bringup save_map [名前]
+      # /slam_toolbox/serialize_map (.posegraph / .data) と
+      # /map_saver/save_map (.yaml / .pgm) の両方を呼ぶ。
+      # ★ nav_with_map.launch.py が読むのは .posegraph。map_saver_cli では作れない
     ros2 run nav2_map_server map_saver_cli -f ~/map/my_room \\
       --ros-args -p save_map_timeout:=10.0
       # ★ 既定の save_map_timeout (2.0s) だとこの環境では discovery が

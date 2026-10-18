@@ -158,7 +158,7 @@ shared: /lekiwi/hardware_wheel_commands → lerobot_bridge
 
 - モータ軸の回転量は実測できます
 - 車輪の空転やオムニローラーの横滑りはエンコーダだけでは検出できません
-- LiDAR の `slam_toolbox` / AMCL と組み合わせて地図座標の誤差を補正します
+- LiDAR の `slam_toolbox` と組み合わせて地図座標の誤差を補正します
 
 ### 安全に関わる作り
 
