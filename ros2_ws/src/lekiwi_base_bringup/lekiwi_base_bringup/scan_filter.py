@@ -9,12 +9,12 @@ LeKiwi の車輪は 3 つ (左 +60°、後ろ 180°、右 −60°) なので、�
 あるときは線形補完する。マスクした点は補完せず、隣としても使わないので、
 機体の点や区間の外をまたいで補完することは無い。
 
-Nav2 のコストマップ・collision_monitor・AMCL・slam_toolbox がこのトピックを
+Nav2 のコストマップ・collision_monitor・slam_toolbox がこのトピックを
 購読することで、車輪・ボディが誤って障害物としてマーキングされるのを防ぐ。
 
 ★ SLAM もこちらを使う (slam_toolbox.yaml の scan_topic)。地図に自機が
-  焼き付くのを避けるため。地図とそれを突き合わせる AMCL (nav2.yaml の
-  amcl.scan_topic) も同じトピックにしてある。
+  焼き付くのを避けるため。保存地図で走るときの localization も
+  同じ slam_toolbox.yaml を使うので、地図と突き合わせる相手が揃う。
 
 パラメータ:
     valid_ranges_deg (float[], 既定 [-170, -70, -50, 50, 70, 170]):

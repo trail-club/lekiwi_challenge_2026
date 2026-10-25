@@ -279,7 +279,7 @@ make release BUS_MODE=shared  # shared機
 | ツール | 出すもの | 何が起きるか |
 | --- | --- | --- |
 | **2D Goal Pose** | `/goal_pose` | **その姿勢へ走る**（Nav2） |
-| **2D Pose Estimate** | `/initialpose` | AMCL の初期姿勢。★ **保存地図構成（`use_saved_map:=true`）のときだけ**意味があります |
+| **2D Pose Estimate** | `/initialpose` | slam_toolbox（localization）の初期姿勢。★ **保存地図構成（`use_saved_map:=true`）のときだけ**意味があります |
 
 ### 表示（Displays パネル）
 

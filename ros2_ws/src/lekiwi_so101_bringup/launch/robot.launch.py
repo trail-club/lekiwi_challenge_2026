@@ -7,10 +7,10 @@
     # 実機なし (Mac でも動く)
     ros2 launch lekiwi_so101_bringup robot.launch.py motor_bus_mode:=split sim:=true
 
-    # 保存済み地図 + AMCL
+    # 保存済み地図 + slam_toolbox (localization)
     ros2 launch lekiwi_so101_bringup robot.launch.py motor_bus_mode:=split \\
       backend:=lerobot robot_id:=my_follower use_saved_map:=true \\
-      map_file:=/maps/my_room.yaml
+      map_file:=/maps/my_room
 
 ────────────────────────────────────────────────────────────────────────
 起動するもの
@@ -21,7 +21,7 @@
 
     base_driver + scan_filter                                   ┐ nav.launch.py /
     sllidar_node (sim:=true なら fake_scan)                     │ sim_nav.launch.py /
-    slam_toolbox または map_server+amcl / Nav2 / map_saver      ┘ nav_with_map.launch.py
+    slam_toolbox (SLAM / localization) / Nav2 / map_saver       ┘ nav_with_map.launch.py
 
     realsense2_camera (手首カメラ)                                d435i.launch.py
 
@@ -129,10 +129,10 @@ def generate_launch_description():
     # ベース側 3 通りの排他条件。
     #   sim:=true                          -> sim_nav.launch.py   (dry_run + fake_scan)
     #   sim:=false かつ use_saved_map:=false -> nav.launch.py       (SLAM)
-    #   sim:=false かつ use_saved_map:=true  -> nav_with_map.launch.py (AMCL)
+    #   sim:=false かつ use_saved_map:=true  -> nav_with_map.launch.py (localization)
     real = NotSubstitution(sim)
     use_slam = AndSubstitution(real, NotSubstitution(use_saved_map))
-    use_amcl = AndSubstitution(real, use_saved_map)
+    use_localization = AndSubstitution(real, use_saved_map)
 
     return LaunchDescription([
         # ───────── 全体 ─────────
@@ -160,10 +160,12 @@ def generate_launch_description():
             description="実機の sllidar_node を起動するか。sim:=true では無視される"),
         DeclareLaunchArgument(
             "use_saved_map", default_value="false",
-            description="true: slam_toolbox の代わりに map_server + AMCL を使う"),
+            description="true: slam_toolbox を localization モードで動かし、"
+                        "保存済み地図で自己位置推定する (地図は更新しない)"),
         DeclareLaunchArgument(
             "map_file", default_value="",
-            description="use_saved_map:=true のとき必須。例 /maps/my_room.yaml"),
+            description="use_saved_map:=true のとき必須。save_map で保存した地図。"
+                        "例 /maps/my_room (<名前>.posegraph を読む)"),
 
         # ───────── アーム ─────────
         DeclareLaunchArgument(
@@ -266,9 +268,9 @@ def generate_launch_description():
             ],
         ),
 
-        # ───────── ベース: 実機 + 保存済み地図 + AMCL ─────────
+        # ───────── ベース: 実機 + 保存済み地図 + slam_toolbox (localization) ─────────
         GroupAction(
-            condition=IfCondition(AndSubstitution(start_base, use_amcl)),
+            condition=IfCondition(AndSubstitution(start_base, use_localization)),
             actions=[
                 IncludeLaunchDescription(
                     PythonLaunchDescriptionSource(

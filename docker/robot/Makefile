@@ -9,7 +9,7 @@
 #   make run-split SO101_ROBOT_ID=my_follower
 #   make run-shared LEKIWI_ROBOT_ID=my_lekiwi
 #   make run-base     ★ アーム無し機体 (ベース + LiDAR + SLAM + Nav2)
-#   make run-base-map MAP_FILE=/maps/my_room.yaml   ★ 同上 + 保存地図 + AMCL
+#   make run-base-map MAP_NAME=my_room   ★ 同上 + 保存地図 + slam_toolbox (localization)
 #   make mock-split / make mock-shared / make mock-base
 #   make shell       コンテナに入る
 #   make stow        reach.launch.py起動中にアームを低く畳む
@@ -36,7 +36,7 @@
 #   robot.launch.py は lekiwi_so101_bringup (結合 URDF + アーム) のもの。
 #   アームが無ければ lekiwi_base_bringup の launch がそのまま答えになる。
 #     nav.launch.py          実機 + SLAM
-#     nav_with_map.launch.py 実機 + 保存地図 + AMCL
+#     nav_with_map.launch.py 実機 + 保存地図 + slam_toolbox (localization)
 #     sim_nav.launch.py      実機なし (dry_run + fake_scan)
 #   どれもベース単体 URDF で robot_state_publisher と RViz を自分で持つ。
 
@@ -73,7 +73,7 @@ endif
 
 MAP_NAME   ?= my_room
 # run-base-map が読む地図。make save-map で作ったものを指す。
-MAP_FILE   ?= /maps/$(MAP_NAME).yaml
+MAP_FILE   ?= /maps/$(MAP_NAME)
 # compose のサービス名 (compose exec / run に渡す)。
 SVC        := robot
 SVC_MOCK   := robot-mock
@@ -294,10 +294,11 @@ run-base: up-base
 		serial_port:=$(CT_RPLIDAR) \
 		start_rviz:=$(START_RVIZ)
 
-# ★ 保存済み地図 + AMCL。slam_toolbox の代わりに map_server + amcl を使う。
+# ★ 保存済み地図 + slam_toolbox (localization モード)。地図は更新しない。
 #   地図は make save-map で作る (MAP_DIR がホスト側、/maps がコンテナ側)。
+#   読むのは <名前>.posegraph / .data。.pgm だけの古い地図は使えない。
 #   ★ map_file は nav_with_map.launch.py の**必須引数**。忘れると launch が
-#     即座に拒否する (起動してから map_server が失敗するのではない)。
+#     即座に拒否する。posegraph が無いときも起動前に拒否する。
 run-base-map: up-base
 	docker compose -f compose.yaml exec -it $(SVC) $(E) \
 		ros2 launch lekiwi_base_bringup nav_with_map.launch.py \
